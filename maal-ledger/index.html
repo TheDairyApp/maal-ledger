@@ -15,6 +15,7 @@ button,input,select,textarea{font:inherit} button{cursor:pointer}
 .side-search{margin-bottom:10px}.side-search input{width:100%;background:#ffffff10;border:1px solid #ffffff22;color:#fff;border-radius:9px;padding:10px}.side-search input::placeholder{color:#9aa5b9}
 .cust-list{overflow:auto;flex:1}.cust-item{padding:10px;border-radius:10px;display:flex;gap:9px;align-items:center;cursor:pointer}.cust-item:hover,.cust-item.active{background:#ffffff12}.avatar{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:800;color:#fff;flex:none}.cust-info{min-width:0;flex:1}.cust-name{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cust-meta{font-size:10.5px;color:#a5afc1;margin-top:3px}.mini{height:4px;background:#ffffff18;border-radius:4px;margin-top:5px;overflow:hidden}.mini i{display:block;height:100%;background:#5dcaa5}
 .main{margin-left:280px;flex:1;padding:28px 34px 70px;min-width:0}.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:22px}.title h2{margin:0;font-size:25px}.title p{margin:4px 0 0;color:var(--muted);font-size:13px}
+.language-select{border:1px solid var(--line);background:#fff;color:var(--ink);padding:8px 10px;border-radius:9px;font-weight:700;font-size:12px}
 .actions{display:flex;gap:8px;flex-wrap:wrap}.btn{border:1px solid var(--line);background:#fff;color:var(--ink);padding:9px 12px;border-radius:9px;font-weight:700;font-size:12px}.btn.primary{background:var(--ink);border-color:var(--ink);color:#fff}.btn.green{background:var(--green);border-color:var(--green);color:#fff}.btn.danger{color:var(--red);border-color:#fca5a5}.btn.small{padding:7px 9px;font-size:11px}
 .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}.stat{padding:15px 16px}.stat label{font-size:11px;color:var(--muted)}.stat strong{display:block;font-size:21px;margin-top:5px}.red{color:var(--red)}.green{color:var(--green)}.amber{color:var(--amber)}
 .section{margin-top:22px}.section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.section-head h3{font-size:14px;margin:0}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
@@ -29,8 +30,9 @@ button,input,select,textarea{font:inherit} button{cursor:pointer}
 .mobile-menu{display:none}
 .toast{position:fixed;right:20px;bottom:20px;background:var(--ink);color:#fff;padding:11px 14px;border-radius:9px;font-size:12px;z-index:100;opacity:0;transform:translateY(10px);transition:.2s}.toast.show{opacity:1;transform:none}
 .loading-box{padding:40px;text-align:center;color:var(--muted);font-weight:600}
+html[lang="ur"] body{direction:rtl}html[lang="ur"] .sidebar{right:0;left:auto}html[lang="ur"] .main{margin-right:280px;margin-left:0}
 @media(max-width:1100px){.stats{grid-template-columns:repeat(3,1fr)}.owner-grid{grid-template-columns:1fr}}
-@media(max-width:800px){.sidebar{display:none}.main{margin-left:0;padding:18px 14px 50px}.mobile-menu{display:block}.stats{grid-template-columns:repeat(2,1fr)}.form-grid{grid-template-columns:1fr}.full{grid-column:auto}.topbar{align-items:flex-start}.title h2{font-size:21px}}
+@media(max-width:800px){.sidebar{display:none}.main{margin-left:0;padding:18px 14px 50px}.mobile-menu{display:block}.stats{grid-template-columns:repeat(2,1fr)}.form-grid{grid-template-columns:1fr}.full{grid-column:auto}.topbar{align-items:flex-start}.title h2{font-size:21px}html[lang="ur"] .main{margin-right:0}}
 @media(max-width:480px){.stats{grid-template-columns:1fr 1fr}.stat strong{font-size:17px}.actions .btn{padding:8px 9px}.qgrid{grid-template-columns:1fr 1fr}}
 </style>
 </head>
@@ -39,11 +41,11 @@ button,input,select,textarea{font:inherit} button{cursor:pointer}
 <aside class="sidebar">
   <div class="brand"><h1>Maal Ledger</h1><p>Supabase Live Cloud</p></div>
   <nav class="nav">
-    <button data-view="dashboard" class="active">Dashboard</button>
-    <button data-view="customers">Customers</button>
-    <button data-view="all">All Qists</button>
+    <button data-view="dashboard" class="active" data-en="Dashboard" data-ur="ڈیش بورڈ">Dashboard</button>
+    <button data-view="customers" data-en="Customers" data-ur="صارفین">Customers</button>
+    <button data-view="all" data-en="All Qists" data-ur="تمام قسطیں">All Qists</button>
   </nav>
-  <div class="side-search"><input id="searchBox" placeholder="Search customer..."></div>
+  <div class="side-search"><input id="searchBox" data-placeholder-en="Search customer..." data-placeholder-ur="صارف تلاش کریں..." placeholder="Search customer..."></div>
   <div class="cust-list" id="custList"></div>
 </aside>
 <main class="main" id="main"><div class="loading-box">Connecting to Supabase...</div></main>
@@ -77,7 +79,16 @@ const SEED_DATA = [
 ];
 
 let DB = { customers: [], deals: [], installments: [], payments: [] };
-let STATE = { view: "dashboard", activeCustomer: null, filter: "all", search: "" };
+let STATE = { view: "dashboard", activeCustomer: null, filter: "all", search: "", language: localStorage.getItem("maal-ledger-language") || "en" };
+document.documentElement.lang = STATE.language === "ur" ? "ur" : "en";
+
+const TRANSLATIONS = {
+  en: { dashboard: "Dashboard", customers: "Customers", allQists: "All Qists", liveOverview: "Live cloud overview of your installment ledger", customerCount: n => `${n} customers in your ledger`, customer: "Customer", customerHistory: "Complete account and payment history", everyInstallment: "Every installment, sortable by status", byInvestor: "By investor", overdue: "Overdue", dueSoon: "Due soon", upcoming: "Upcoming", paid: "Paid", all: "All", viewAll: "View all", noOverdue: "No overdue installments", nothingDue: "Nothing due in 7 days.", noCustomers: "No customers yet.", noInstallments: "No installments in this filter.", addCustomer: "+ Add Customer", addDeal: "+ Add deal", refresh: "Refresh", addPayment: "+ Payment", backCustomers: "Customers" },
+  ur: { dashboard: "ڈیش بورڈ", customers: "صارفین", allQists: "تمام قسطیں", liveOverview: "آپ کے قسطوں کے کھاتے کا آن لائن جائزہ", customerCount: n => `آپ کے کھاتے میں ${n} صارفین`, customer: "صارف", customerHistory: "اکاؤنٹ اور ادائیگی کی مکمل تاریخ", everyInstallment: "تمام قسطیں، حیثیت کے مطابق", byInvestor: "سرمایہ کار کے لحاظ سے", overdue: "واجب الادا", dueSoon: "جلد واجب", upcoming: "آنے والی", paid: "ادا شدہ", all: "تمام", viewAll: "سب دیکھیں", noOverdue: "کوئی واجب الادا قسط نہیں", nothingDue: "اگلے 7 دن میں کوئی قسط نہیں۔", noCustomers: "ابھی کوئی صارف نہیں۔", noInstallments: "اس فلٹر میں کوئی قسط نہیں۔", addCustomer: "+ صارف شامل کریں", addDeal: "+ سودا شامل کریں", refresh: "تازہ کریں", addPayment: "+ ادائیگی", backCustomers: "صارفین" }
+};
+function t(key, ...args) { const value = TRANSLATIONS[STATE.language][key] ?? TRANSLATIONS.en[key] ?? key; return typeof value === "function" ? value(...args) : value; }
+function setLanguage(language) { STATE.language = language; localStorage.setItem("maal-ledger-language", language); document.documentElement.lang = language === "ur" ? "ur" : "en"; render(); }
+function languageControl() { return `<select class="language-select" aria-label="Language" onchange="setLanguage(this.value)"><option value="en" ${STATE.language === "en" ? "selected" : ""}>English</option><option value="ur" ${STATE.language === "ur" ? "selected" : ""}>اردو</option></select>`; }
 
 function uid(p) { return p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function money(n) { return "Rs " + Math.round(Number(n) || 0).toLocaleString("en-IN"); }
@@ -104,18 +115,18 @@ function wa(inst) {
 }
 
 function qbox(i) {
-  const st = status(i), label = { paid: "Paid", overdue: "Overdue", soon: "Due soon", future: "Upcoming" }[st], got = received(i.id);
+  const st = status(i), label = { paid: t("paid"), overdue: t("overdue"), soon: t("dueSoon"), future: t("upcoming") }[st], got = received(i.id);
   return `<div class="qbox ${st}">
     ${st === "paid" ? '<div class="stamp">PAID</div>' : ''}
     <div class="qnum">QIST ${i.qist}</div>
     <div class="qamt">${money(i.amount)}</div>
     <div class="qdate">${dateFmt(i.due)}</div>
-    <div class="status">${label}${got && st !== "paid" ? ` · ${money(got)} received` : ""}</div>
+    <div class="status">${label}${got && st !== "paid" ? ` · ${money(got)} ${STATE.language === "ur" ? "وصول" : "received"}` : ""}</div>
     <div class="qactions">
-      <button class="btn small" onclick="openPayment('${i.id}')">${st === "paid" ? "View" : "Pay"}</button>
+      <button class="btn small" onclick="openPayment('${i.id}')">${st === "paid" ? (STATE.language === "ur" ? "دیکھیں" : "View") : (STATE.language === "ur" ? "ادائیگی" : "Pay")}</button>
       <a class="btn small" target="_blank" href="${wa(i)}">WhatsApp</a>
     </div>
-    <button class="btn small" style="width:100%;margin-top:5px" onclick="openInstallment('${i.id}')">Edit</button>
+    <button class="btn small" style="width:100%;margin-top:5px" onclick="openInstallment('${i.id}')">${STATE.language === "ur" ? "ترمیم" : "Edit"}</button>
   </div>`;
 }
 
@@ -185,11 +196,13 @@ function renderSidebar() {
 }
 
 function layout(title, sub, body, actions = "") {
-  return `<div class="topbar"><div class="title"><h2>${title}</h2><p>${sub}</p></div><div class="actions"><button class="btn mobile-menu" onclick="mobileNav()">☰ Menu</button>${actions}</div></div>${body}`;
+  return `<div class="topbar"><div class="title"><h2>${title}</h2><p>${sub}</p></div><div class="actions">${languageControl()}<button class="btn mobile-menu" onclick="mobileNav()">☰ Menu</button>${actions}</div></div>${body}`;
 }
 
 function navActive() {
-  document.querySelectorAll(".nav button").forEach(b => b.classList.toggle("active", b.dataset.view === STATE.view));
+  document.querySelectorAll(".nav button").forEach(b => { b.classList.toggle("active", b.dataset.view === STATE.view); b.textContent = b.dataset[STATE.language]; });
+  const searchBox = document.getElementById("searchBox");
+  searchBox.placeholder = searchBox.dataset[`placeholder-${STATE.language}`];
 }
 
 function render() {
@@ -210,37 +223,37 @@ function dashboard() {
     return { o, t, p, out: t - p };
   });
 
-  return layout("Dashboard", "Live cloud overview of your installment ledger",
+  return layout(t("dashboard"), t("liveOverview"),
     `<div class="stats">
-      <div class="card stat"><label>Total ledger value</label><strong>${money(total)}</strong></div>
-      <div class="card stat"><label>Received</label><strong class="green">${money(got)}</strong></div>
-      <div class="card stat"><label>Outstanding</label><strong class="amber">${money(out)}</strong></div>
-      <div class="card stat"><label>Overdue qists</label><strong class="red">${overdue.length}</strong></div>
-      <div class="card stat"><label>Due within 7 days</label><strong>${soon.length}</strong></div>
+      <div class="card stat"><label>${STATE.language === "ur" ? "کل کھاتے کی مالیت" : "Total ledger value"}</label><strong>${money(total)}</strong></div>
+      <div class="card stat"><label>${STATE.language === "ur" ? "وصول شدہ" : "Received"}</label><strong class="green">${money(got)}</strong></div>
+      <div class="card stat"><label>${STATE.language === "ur" ? "بقایا" : "Outstanding"}</label><strong class="amber">${money(out)}</strong></div>
+      <div class="card stat"><label>${STATE.language === "ur" ? "واجب الادا قسطیں" : "Overdue qists"}</label><strong class="red">${overdue.length}</strong></div>
+      <div class="card stat"><label>${STATE.language === "ur" ? "7 دن میں واجب" : "Due within 7 days"}</label><strong>${soon.length}</strong></div>
     </div>
     ${overdue.length ? `<div class="alert"><b>${overdue.length} overdue qist${overdue.length > 1 ? "s" : ""}</b> · ${money(overdue.reduce((s, i) => s + Number(i.amount) - received(i.id), 0))} outstanding.</div>` : ""}
-    <div class="section"><div class="section-head"><h3>By investor</h3></div><div class="owner-grid">${owner.map(r => `<div class="card owner"><div><span class="dot" style="background:${OWNER_COLORS[r.o].fill}"></span> <b>${r.o}</b></div><div class="small muted" style="margin-top:12px">Total</div><b>${money(r.t)}</b><div class="small muted" style="margin-top:8px">Received ${money(r.p)}</div><div class="small muted">Outstanding ${money(r.out)}</div></div>`).join("")}</div></div>
-    <div class="section"><div class="section-head"><h3>Overdue</h3><button class="btn small" onclick="setFilter('overdue')">View all</button></div><div class="qgrid">${overdue.slice(0, 8).map(qbox).join("") || '<div class="empty">No overdue installments 🎉</div>'}</div></div>
-    <div class="section"><div class="section-head"><h3>Due soon</h3><button class="btn small" onclick="setFilter('soon')">View all</button></div><div class="qgrid">${soon.slice(0, 8).map(qbox).join("") || '<div class="empty">Nothing due in 7 days.</div>'}</div></div>`,
-    `<button class="btn primary" onclick="openCustomer()">+ Customer</button><button class="btn" onclick="openDeal()">+ Deal</button><button class="btn" onclick="syncCloud()">↻ Refresh</button>`);
+    <div class="section"><div class="section-head"><h3>${t("byInvestor")}</h3></div><div class="owner-grid">${owner.map(r => `<div class="card owner"><div><span class="dot" style="background:${OWNER_COLORS[r.o].fill}"></span> <b>${r.o}</b></div><div class="small muted" style="margin-top:12px">Total</div><b>${money(r.t)}</b><div class="small muted" style="margin-top:8px">Received ${money(r.p)}</div><div class="small muted">Outstanding ${money(r.out)}</div></div>`).join("")}</div></div>
+    <div class="section"><div class="section-head"><h3>${t("overdue")}</h3><button class="btn small" onclick="setFilter('overdue')">${t("viewAll")}</button></div><div class="qgrid">${overdue.slice(0, 8).map(qbox).join("") || `<div class="empty">${t("noOverdue")}</div>`}</div></div>
+    <div class="section"><div class="section-head"><h3>${t("dueSoon")}</h3><button class="btn small" onclick="setFilter('soon')">${t("viewAll")}</button></div><div class="qgrid">${soon.slice(0, 8).map(qbox).join("") || `<div class="empty">${t("nothingDue")}</div>`}</div></div>`,
+    `<button class="btn primary" onclick="openCustomer()">${t("addCustomer")}</button><button class="btn" onclick="openDeal()">${t("addDeal")}</button><button class="btn" onclick="syncCloud()">↻ ${t("refresh")}</button>`);
 }
 
 function customers() {
   if (!STATE.activeCustomer) {
     const cs = DB.customers;
-    return layout("Customers", `${cs.length} customers in your ledger`,
+    return layout(t("customers"), t("customerCount", cs.length),
       `<div class="grid">${cs.map(c => {
         const s = custStats(c.id);
         return `<div class="card customer-card" onclick="selectCustomer('${c.id}')"><div class="row"><div><b>${esc(c.name)}</b><div class="small muted">${c.phone || "No WhatsApp number"}</div></div><div class="avatar" style="background:${OWNER_COLORS[DB.deals.find(d => d.customerId === c.id)?.owner]?.fill || "#555"}">${initials(c.name)}</div></div><div class="row" style="margin-top:14px"><span class="small muted">${s.pct}% paid</span><b>${money(s.out)}</b></div><div class="progress"><i style="width:${s.pct}%"></i></div><div class="actions" style="margin-top:12px"><button class="btn small" onclick="event.stopPropagation();openCustomer('${c.id}')">Edit</button><button class="btn small danger" onclick="event.stopPropagation();deleteCustomer('${c.id}')">Delete</button></div></div>`;
-      }).join("") || '<div class="empty">No customers yet.</div>'}</div>`,
-      `<button class="btn primary" onclick="openCustomer()">+ Add Customer</button>`);
+      }).join("") || `<div class="empty">${t("noCustomers")}</div>`}</div>`,
+      `<button class="btn primary" onclick="openCustomer()">${t("addCustomer")}</button>`);
   }
 
   const c = customer(STATE.activeCustomer), s = custStats(c.id), ds = DB.deals.filter(d => d.customerId === c.id);
-  return layout("Customer", "Complete account and payment history",
+  return layout(t("customer"), t("customerHistory"),
     `<div class="card header-card"><div class="row"><div><h2>${esc(c.name)}</h2><div class="tags">${[...new Set(ds.map(d => d.owner))].map(o => `<span class="tag" style="background:${OWNER_COLORS[o]?.bg || '#eee'};color:${OWNER_COLORS[o]?.text || '#333'}">${o}</span>`).join("")}</div></div><div class="actions"><button class="btn" onclick="openCustomer('${c.id}')">Edit customer</button><button class="btn primary" onclick="openDeal('${c.id}')">+ Add deal</button></div></div><div class="phone"><div class="field"><label>WhatsApp number</label><input value="${esc(c.phone)}" placeholder="923001234567" onchange="updatePhone('${c.id}',this.value)"></div></div><div class="metrics"><div class="metric"><label>Total tracked</label><strong>${money(s.total)}</strong></div><div class="metric"><label>Received</label><strong class="green">${money(s.got)}</strong></div><div class="metric"><label>Outstanding</label><strong class="amber">${money(s.out)}</strong></div><div class="metric"><label>Progress</label><strong>${s.pct}%</strong></div></div><div class="progress"><i style="width:${s.pct}%"></i></div></div>
   ${ds.map(d => `<div class="card truck"><div class="truck-head"><div><div class="truck-title">${esc(d.title)}</div><div class="truck-sub">Owner: ${esc(d.owner)} · Total: ${money(d.total)}</div></div><div class="actions"><button class="btn small" onclick="openDeal('${c.id}','${d.id}')">Edit deal</button><button class="btn small danger" onclick="deleteDeal('${d.id}')">Delete</button></div></div><div class="route">${DB.installments.filter(i => i.dealId === d.id).sort((a, b) => a.qist - b.qist).map(i => qbox({ ...i, deal: d, customer: c })).join("")}</div></div>`).join("") || '<div class="empty">No deals for this customer.</div>'}`,
-    `<button class="btn" onclick="setView('customers')">← Customers</button>`);
+    `<button class="btn" onclick="setView('customers')">← ${t("backCustomers")}</button>`);
 }
 
 function allQists() {
@@ -250,9 +263,9 @@ function allQists() {
   const counts = { all: all().length, overdue: 0, soon: 0, paid: 0, future: 0 };
   all().forEach(i => counts[status(i)]++);
 
-  return layout("All Qists", "Every installment, sortable by status",
-    `<div class="filter">${Object.entries({ all: "All", overdue: "Overdue", soon: "Due soon", paid: "Paid", future: "Upcoming" }).map(([k, v]) => `<button class="chip ${STATE.filter === k ? "active" : ""}" onclick="setFilter('${k}')">${v} (${counts[k]})</button>`).join("")}</div><div class="qgrid">${xs.map(i => qbox(i)).join("") || '<div class="empty">No installments in this filter.</div>'}</div>`,
-    `<button class="btn primary" onclick="openPayment()">+ Payment</button>`);
+  return layout(t("allQists"), t("everyInstallment"),
+    `<div class="filter">${[["all", "all"], ["overdue", "overdue"], ["soon", "dueSoon"], ["paid", "paid"], ["future", "upcoming"]].map(([k, key]) => `<button class="chip ${STATE.filter === k ? "active" : ""}" onclick="setFilter('${k}')">${t(key)} (${counts[k]})</button>`).join("")}</div><div class="qgrid">${xs.map(i => qbox(i)).join("") || `<div class="empty">${t("noInstallments")}</div>`}</div>`,
+    `<button class="btn primary" onclick="openPayment()">${t("addPayment")}</button>`);
 }
 
 function openModal(content) { document.getElementById("modal").innerHTML = content; document.getElementById("modalBack").classList.add("show"); }
