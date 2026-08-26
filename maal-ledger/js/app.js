@@ -1,5 +1,39 @@
 let STATE = { view: "dashboard", activeCustomer: null, filter: "all", search: "" };
 
+
+
+// --- AUTHENTICATION ---
+async function handleLogin() {
+  const email = document.getElementById("loginEmail").value.trim();
+  const password = document.getElementById("loginPassword").value;
+  const errorDiv = document.getElementById("loginError");
+
+  if (!email || !password) {
+    errorDiv.textContent = "Please enter both email and password.";
+    return;
+  }
+
+  errorDiv.textContent = "Signing in...";
+
+  // Attempt to sign in with Supabase
+  const { data, error } = await dbClient.auth.signInWithPassword({
+    email: email,
+    password: password,
+  });
+
+  if (error) {
+    errorDiv.textContent = error.message; // Show invalid credentials error
+  } else {
+    // Success! Clear errors and hide the login screen
+    errorDiv.textContent = "";
+    document.getElementById("loginOverlay").classList.add("hidden");
+    
+    // Fetch the secured data and render the dashboard
+    await syncCloud(); 
+  }
+}
+
+
 function money(n) { return "Rs " + Math.round(Number(n) || 0).toLocaleString("en-IN"); }
 function dateFmt(d) { if (!d) return "—"; return new Date(d + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }); }
 function daysUntil(d) { const a = new Date(); a.setHours(0, 0, 0, 0); return Math.round((new Date(d + "T00:00:00") - a) / 86400000); }
@@ -339,8 +373,22 @@ document.querySelectorAll(".nav button").forEach(b => b.onclick = () => {
 document.getElementById("searchBox").oninput = e => { STATE.search = e.target.value; renderSidebar(); };
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
 
-// App Init
+// App Init with Auth Check
 (async function init() {
-  await loadDataFromSupabase();
-  render();
+  // 1. Check if Supabase already remembers you (active session)
+  const { data: { session } } = await dbClient.auth.getSession();
+
+  if (session) {
+    // 2a. You are logged in: Hide overlay and load data
+    document.getElementById("loginOverlay").classList.add("hidden");
+    await loadDataFromSupabase();
+    render();
+  } else {
+    // 2b. Not logged in: Ensure login screen is visible
+    document.getElementById("loginOverlay").classList.remove("hidden");
+  }
 })();
+
+
+
+

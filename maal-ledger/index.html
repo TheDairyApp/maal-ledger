@@ -1,470 +1,69 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Maal Ledger — Cloud Pro</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<style>
-:root{--ink:#14213D;--page:#F4F6FA;--card:#fff;--line:#DEE3EC;--muted:#697386;--teal:#0F766E;--teal-bg:#E4F5F1;--green:#15803D;--green-bg:#E6F6EA;--amber:#B45309;--amber-bg:#FFF1DE;--red:#B91C1C;--red-bg:#FDE7E7;--violet:#6D28D9;--violet-bg:#EEE8FC;--shadow:0 8px 28px rgba(20,33,61,.06);--radius:14px}
-*{box-sizing:border-box} body{margin:0;background:var(--page);color:var(--ink);font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}
-button,input,select,textarea{font:inherit} button{cursor:pointer}
-.app{display:flex;min-height:100vh}.sidebar{width:280px;background:var(--ink);color:#fff;position:fixed;inset:0 auto 0 0;padding:20px 14px;display:flex;flex-direction:column;z-index:20}
-.brand{padding:4px 10px 18px;border-bottom:1px solid #ffffff1c}.brand h1{font-size:21px;margin:0}.brand p{margin:5px 0 0;color:#aeb8cb;font-size:12px}
-.nav{display:grid;gap:6px;margin:16px 0}.nav button{border:0;background:transparent;color:#c9d2e3;text-align:left;padding:11px 12px;border-radius:9px;font-weight:600}.nav button:hover{background:#ffffff0d}.nav button.active{background:#fff;color:var(--ink)}
-.side-search{margin-bottom:10px}.side-search input{width:100%;background:#ffffff10;border:1px solid #ffffff22;color:#fff;border-radius:9px;padding:10px}.side-search input::placeholder{color:#9aa5b9}
-.cust-list{overflow:auto;flex:1}.cust-item{padding:10px;border-radius:10px;display:flex;gap:9px;align-items:center;cursor:pointer}.cust-item:hover,.cust-item.active{background:#ffffff12}.avatar{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:800;color:#fff;flex:none}.cust-info{min-width:0;flex:1}.cust-name{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cust-meta{font-size:10.5px;color:#a5afc1;margin-top:3px}.mini{height:4px;background:#ffffff18;border-radius:4px;margin-top:5px;overflow:hidden}.mini i{display:block;height:100%;background:#5dcaa5}
-.main{margin-left:280px;flex:1;padding:28px 34px 70px;min-width:0}.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:22px}.title h2{margin:0;font-size:25px}.title p{margin:4px 0 0;color:var(--muted);font-size:13px}
-.language-select{border:1px solid var(--line);background:#fff;color:var(--ink);padding:8px 10px;border-radius:9px;font-weight:700;font-size:12px}
-.actions{display:flex;gap:8px;flex-wrap:wrap}.btn{border:1px solid var(--line);background:#fff;color:var(--ink);padding:9px 12px;border-radius:9px;font-weight:700;font-size:12px}.btn.primary{background:var(--ink);border-color:var(--ink);color:#fff}.btn.green{background:var(--green);border-color:var(--green);color:#fff}.btn.danger{color:var(--red);border-color:#fca5a5}.btn.small{padding:7px 9px;font-size:11px}
-.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}.stat{padding:15px 16px}.stat label{font-size:11px;color:var(--muted)}.stat strong{display:block;font-size:21px;margin-top:5px}.red{color:var(--red)}.green{color:var(--green)}.amber{color:var(--amber)}
-.section{margin-top:22px}.section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.section-head h3{font-size:14px;margin:0}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
-.customer-card{padding:16px;cursor:pointer}.customer-card:hover{border-color:#bcc5d4}.row{display:flex;justify-content:space-between;align-items:center;gap:10px}.muted{color:var(--muted)}.small{font-size:11px}.progress{height:7px;background:#edf0f4;border-radius:7px;overflow:hidden;margin-top:12px}.progress i{display:block;height:100%;background:linear-gradient(90deg,var(--green),#5dcaa5)}
-.alert{padding:12px 14px;background:var(--red-bg);border:1px solid #f2bcbc;color:#8f1515;border-radius:11px;font-size:12px;margin-bottom:18px}
-.owner-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.owner{padding:15px}.dot{width:9px;height:9px;border-radius:50%;display:inline-block}
-.filter{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}.chip{border:1px solid var(--line);background:#fff;padding:7px 11px;border-radius:20px;font-size:11px}.chip.active{background:var(--ink);color:#fff;border-color:var(--ink)}
-.qgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:10px}.qbox{padding:13px;border:1px solid var(--line);border-radius:12px;background:#fff;position:relative}.qbox.paid{background:var(--green-bg);border-color:#b6ddc0}.qbox.overdue{background:var(--red-bg);border-color:#efb7b7}.qbox.soon{background:var(--amber-bg);border-color:#efd19f}.qnum{text-align:center;font-size:10px;color:var(--muted);font-weight:800}.qamt{text-align:center;font-size:15px;font-weight:800;margin:5px 0}.qdate{text-align:center;font-size:10px;color:var(--muted)}.status{text-align:center;font-size:10px;font-weight:800;text-transform:uppercase;margin:7px 0}.qactions{display:flex;gap:5px}.qactions button,.qactions a{flex:1;text-align:center;text-decoration:none}.stamp{position:absolute;right:7px;top:7px;font-size:8px;font-weight:900;border:2px solid var(--green);color:var(--green);border-radius:50%;padding:6px 4px;transform:rotate(-12deg)}
-.header-card{padding:20px;margin-bottom:16px}.header-card h2{margin:0 0 5px}.tags{display:flex;gap:6px;flex-wrap:wrap}.tag{font-size:10px;padding:4px 8px;border-radius:20px;background:#eee}.metrics{display:flex;gap:28px;flex-wrap:wrap;margin-top:18px}.metric label{display:block;font-size:10px;color:var(--muted)}.metric strong{font-size:17px}.phone{margin-top:12px;display:flex;gap:7px;align-items:flex-end}.field label{display:block;font-size:10px;color:var(--muted);margin-bottom:4px}.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 9px;background:#fff;outline:none}.field input:focus,.field select:focus,.field textarea:focus{border-color:#8995aa}
-.truck{padding:16px;margin-bottom:12px}.truck-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.truck-title{font-weight:800;font-size:13px}.truck-sub{font-size:10px;color:var(--muted);margin-top:3px}.route{display:flex;gap:9px;overflow:auto;padding:16px 2px 4px}.route .qbox{min-width:160px}.empty{padding:35px;text-align:center;color:var(--muted);border:1px dashed #cbd2dd;border-radius:12px;background:#fff}
-.modal-back{position:fixed;inset:0;background:#0b1320a6;display:none;place-items:center;padding:20px;z-index:50}.modal-back.show{display:grid}.modal{background:#fff;border-radius:16px;max-width:620px;width:100%;max-height:90vh;overflow:auto;padding:20px;box-shadow:0 20px 60px #0003}.modal h3{margin:0 0 15px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.full{grid-column:1/-1}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.payment-list{display:grid;gap:8px;margin-top:12px}.payment{border:1px solid var(--line);border-radius:9px;padding:10px;font-size:11px}
-.mobile-menu{display:none}
-.toast{position:fixed;right:20px;bottom:20px;background:var(--ink);color:#fff;padding:11px 14px;border-radius:9px;font-size:12px;z-index:100;opacity:0;transform:translateY(10px);transition:.2s}.toast.show{opacity:1;transform:none}
-.loading-box{padding:40px;text-align:center;color:var(--muted);font-weight:600}
-html[lang="ur"] body{direction:rtl}html[lang="ur"] .sidebar{right:0;left:auto}html[lang="ur"] .main{margin-right:280px;margin-left:0}
-@media(max-width:1100px){.stats{grid-template-columns:repeat(3,1fr)}.owner-grid{grid-template-columns:1fr}}
-@media(max-width:800px){.sidebar{display:none}.main{margin-left:0;padding:18px 14px 50px}.mobile-menu{display:block}.stats{grid-template-columns:repeat(2,1fr)}.form-grid{grid-template-columns:1fr}.full{grid-column:auto}.topbar{align-items:flex-start}.title h2{font-size:21px}html[lang="ur"] .main{margin-right:0}}
-@media(max-width:480px){.stats{grid-template-columns:1fr 1fr}.stat strong{font-size:17px}.actions .btn{padding:8px 9px}.qgrid{grid-template-columns:1fr 1fr}}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maal Ledger — Cloud Pro</title>
+  <!-- External Supabase Library -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
+  <!-- Link to your modular stylesheet -->
+  <link rel="stylesheet" href="styles/style.css">
+  
+  <!-- Link to your favicon (assuming it's in the root or assets folder) -->
+  <link rel="icon" href="favicon.ico">
 </head>
 <body>
-<div class="app">
-<aside class="sidebar">
-  <div class="brand"><h1>Maal Ledger</h1><p>Supabase Live Cloud</p></div>
-  <nav class="nav">
-    <button data-view="dashboard" class="active" data-en="Dashboard" data-ur="ڈیش بورڈ">Dashboard</button>
-    <button data-view="customers" data-en="Customers" data-ur="صارفین">Customers</button>
-    <button data-view="all" data-en="All Qists" data-ur="تمام قسطیں">All Qists</button>
-  </nav>
-  <div class="side-search"><input id="searchBox" data-placeholder-en="Search customer..." data-placeholder-ur="صارف تلاش کریں..." placeholder="Search customer..."></div>
-  <div class="cust-list" id="custList"></div>
-</aside>
-<main class="main" id="main"><div class="loading-box">Connecting to Supabase...</div></main>
-</div>
 
-<div class="modal-back" id="modalBack"><div class="modal" id="modal"></div></div>
-<div class="toast" id="toast"></div>
-
-<script>
-const SUPABASE_URL = "https://soopgkgqsnutxhkgfova.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNvb3Bna2dxc251dHhoa2dmb3ZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc2Njg1MDYsImV4cCI6MjEwMzI0NDUwNn0.JKnPTbrkgLgJodhvDbHrpsquP8C55QpScUeZ34iBFew";
-const dbClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-const OWNER_COLORS = {
-  "Self": { fill: "#0F766E", bg: "#E4F5F1", text: "#0B5A54" },
-  "Baji": { fill: "#B45309", bg: "#FFF1DE", text: "#8A4108" },
-  "Ch Tahir": { fill: "#6D28D9", bg: "#EEE8FC", text: "#5420AE" }
-};
-
-const SEED_DATA = [
-  { owner: "Self", client: "Samdani", deal: "10 Aug 2026 · 12 items", total: 6530000, installments: [[1, 1088500, "2026-09-10"], [2, 1088500, "2026-10-10"], [3, 1088500, "2026-11-10"], [4, 1088500, "2026-12-10"], [5, 1088000, "2027-01-10"], [6, 1088000, "2027-02-10"]] },
-  { owner: "Self", client: "Mufti Amir c/o Arif", deal: "1 Aug 2026 · 6 items", total: 3000000, installments: [[1, 1000000, "2026-09-01"], [2, 1000000, "2026-10-01"], [3, 1000000, "2026-11-01"]] },
-  { owner: "Self", client: "Noman Yahya", deal: "8 Apr 2026 · 12 items", total: 7200000, installments: [[4, 1440000, "2026-08-10"], [5, 1440000, "2026-09-10"]] },
-  { owner: "Self", client: "Noman Yahya", deal: "5 Aug 2026 · 6 items", total: 3752000, installments: [[1, 750400, "2026-09-05"], [2, 750400, "2026-10-05"], [3, 750400, "2026-11-05"], [4, 750400, "2026-12-05"], [5, 750400, "2027-01-05"]] },
-  { owner: "Self", client: "Mubeen Memon", deal: "18 May 2026 · 12 items", total: 6980000, installments: [[3, 1396000, "2026-08-20"], [4, 1396000, "2026-09-20"], [5, 1396000, "2026-10-20"]] },
-  { owner: "Self", client: "Arif 10 / Fahad", deal: "12 May 2026 · 6 items", total: 3278000, installments: [[3, 655600, "2026-08-23"], [4, 655600, "2026-09-23"], [5, 655600, "2026-10-23"]] },
-  { owner: "Self", client: "Arif 9", deal: "1 Apr 2026 · 3 items", total: 1507500, installments: [[4, 301500, "2026-08-15"], [5, 301500, "2026-09-15"]] },
-  { owner: "Baji", client: "Arif 9", deal: "1 Apr 2026 · 3 items (Baji's share)", total: 1507500, installments: [[4, 301500, "2026-08-15"], [5, 301500, "2026-09-15"]] },
-  { owner: "Baji", client: "Mubin", deal: "20 May 2026 · 2 items", total: 1247000, installments: [[3, 249400, "2026-08-23"], [4, 249400, "2026-09-23"], [5, 249400, "2026-10-23"]] },
-  { owner: "Ch Tahir", client: "Mubin", deal: "20 May 2026 · 4 items", total: 2493000, installments: [[3, 498600, "2026-08-23"], [4, 498600, "2026-09-23"], [5, 498600, "2026-10-23"]] }
-];
-
-let DB = { customers: [], deals: [], installments: [], payments: [] };
-let STATE = { view: "dashboard", activeCustomer: null, filter: "all", search: "", language: localStorage.getItem("maal-ledger-language") || "en" };
-document.documentElement.lang = STATE.language === "ur" ? "ur" : "en";
-
-const TRANSLATIONS = {
-  en: { dashboard: "Dashboard", customers: "Customers", allQists: "All Qists", liveOverview: "Live cloud overview of your installment ledger", customerCount: n => `${n} customers in your ledger`, customer: "Customer", customerHistory: "Complete account and payment history", everyInstallment: "Every installment, sortable by status", byInvestor: "By investor", overdue: "Overdue", dueSoon: "Due soon", upcoming: "Upcoming", paid: "Paid", all: "All", viewAll: "View all", noOverdue: "No overdue installments", nothingDue: "Nothing due in 7 days.", noCustomers: "No customers yet.", noInstallments: "No installments in this filter.", addCustomer: "+ Add Customer", addDeal: "+ Add deal", refresh: "Refresh", addPayment: "+ Payment", backCustomers: "Customers" },
-  ur: { dashboard: "ڈیش بورڈ", customers: "صارفین", allQists: "تمام قسطیں", liveOverview: "آپ کے قسطوں کے کھاتے کا آن لائن جائزہ", customerCount: n => `آپ کے کھاتے میں ${n} صارفین`, customer: "صارف", customerHistory: "اکاؤنٹ اور ادائیگی کی مکمل تاریخ", everyInstallment: "تمام قسطیں، حیثیت کے مطابق", byInvestor: "سرمایہ کار کے لحاظ سے", overdue: "واجب الادا", dueSoon: "جلد واجب", upcoming: "آنے والی", paid: "ادا شدہ", all: "تمام", viewAll: "سب دیکھیں", noOverdue: "کوئی واجب الادا قسط نہیں", nothingDue: "اگلے 7 دن میں کوئی قسط نہیں۔", noCustomers: "ابھی کوئی صارف نہیں۔", noInstallments: "اس فلٹر میں کوئی قسط نہیں۔", addCustomer: "+ صارف شامل کریں", addDeal: "+ سودا شامل کریں", refresh: "تازہ کریں", addPayment: "+ ادائیگی", backCustomers: "صارفین" }
-};
-function t(key, ...args) { const value = TRANSLATIONS[STATE.language][key] ?? TRANSLATIONS.en[key] ?? key; return typeof value === "function" ? value(...args) : value; }
-function setLanguage(language) { STATE.language = language; localStorage.setItem("maal-ledger-language", language); document.documentElement.lang = language === "ur" ? "ur" : "en"; render(); }
-function languageControl() { return `<select class="language-select" aria-label="Language" onchange="setLanguage(this.value)"><option value="en" ${STATE.language === "en" ? "selected" : ""}>English</option><option value="ur" ${STATE.language === "ur" ? "selected" : ""}>اردو</option></select>`; }
-
-function uid(p) { return p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
-function money(n) { return "Rs " + Math.round(Number(n) || 0).toLocaleString("en-IN"); }
-function dateFmt(d) { if (!d) return "—"; return new Date(d + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }); }
-function daysUntil(d) { const a = new Date(); a.setHours(0, 0, 0, 0); return Math.round((new Date(d + "T00:00:00") - a) / 86400000); }
-function customer(id) { return DB.customers.find(x => x.id === id); }
-function deal(id) { return DB.deals.find(x => x.id === id); }
-function paymentsFor(instId) { return DB.payments.filter(p => p.installmentId === instId); }
-function received(instId) { return paymentsFor(instId).reduce((s, p) => s + Number(p.amount || 0), 0); }
-function status(i) { if (received(i.id) >= Number(i.amount)) return "paid"; let d = daysUntil(i.due); if (d < 0) return "overdue"; if (d <= 7) return "soon"; return "future"; }
-function all() { return DB.installments.map(i => ({ ...i, deal: deal(i.dealId), customer: customer(deal(i.dealId)?.customerId) })).filter(x => x.deal && x.customer); }
-function custStats(cid) {
-  const xs = all().filter(i => i.customer.id === cid), total = xs.reduce((s, i) => s + Number(i.amount), 0), got = xs.reduce((s, i) => s + Math.min(received(i.id), Number(i.amount)), 0);
-  return { items: xs, total, got, out: Math.max(0, total - got), pct: total ? Math.round(got / total * 100) : 0 };
-}
-function initials(n) { return (n || "").split(/[\s\/]+/).filter(Boolean).slice(0, 2).map(x => x[0]).join("").toUpperCase(); }
-function toast(s) { const t = document.getElementById("toast"); t.textContent = s; t.classList.add("show"); clearTimeout(window._toast); window._toast = setTimeout(() => t.classList.remove("show"), 2200); }
-function esc(s) { return String(s ?? "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m])); }
-
-function wa(inst) {
-  const c = inst.customer, msg = `Hi ${c.name}, your installment No. ${inst.qist} of ${money(inst.amount)} is due on ${dateFmt(inst.due)}. Kindly confirm once paid. Thank you!`;
-  const phone = (c.phone || "").replace(/\D/g, "");
-  return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
-}
-
-function qbox(i) {
-  const st = status(i), label = { paid: t("paid"), overdue: t("overdue"), soon: t("dueSoon"), future: t("upcoming") }[st], got = received(i.id);
-  return `<div class="qbox ${st}">
-    ${st === "paid" ? '<div class="stamp">PAID</div>' : ''}
-    <div class="qnum">QIST ${i.qist}</div>
-    <div class="qamt">${money(i.amount)}</div>
-    <div class="qdate">${dateFmt(i.due)}</div>
-    <div class="status">${label}${got && st !== "paid" ? ` · ${money(got)} ${STATE.language === "ur" ? "وصول" : "received"}` : ""}</div>
-    <div class="qactions">
-      <button class="btn small" onclick="openPayment('${i.id}')">${st === "paid" ? (STATE.language === "ur" ? "دیکھیں" : "View") : (STATE.language === "ur" ? "ادائیگی" : "Pay")}</button>
-      <a class="btn small" target="_blank" href="${wa(i)}">WhatsApp</a>
+    <!-- LOGIN OVERLAY -->
+  <div id="loginOverlay" class="login-overlay">
+    <div class="card login-card">
+      <div class="brand" style="border: none; padding-bottom: 10px; text-align: center; color: var(--ink);">
+        <h1 style="font-size: 24px;">Maal Ledger</h1>
+        <p style="color: var(--muted);">Sign in to access your secure cloud</p>
+      </div>
+      
+      <div class="form-grid" style="grid-template-columns: 1fr;">
+        <div class="field full">
+          <label>Email Address</label>
+          <input type="email" id="loginEmail" placeholder="gujjarmilkwholesalers@gmail.com">
+        </div>
+        <div class="field full">
+          <label>Password</label>
+          <input type="password" id="loginPassword" placeholder="••••••••">
+        </div>
+      </div>
+      
+      <div id="loginError" class="small red" style="text-align: center; margin-top: 10px; height: 15px;"></div>
+      
+      <button class="btn primary" onclick="handleLogin()" style="width: 100%; margin-top: 15px; padding: 12px; font-size: 14px;">
+        Sign In
+      </button>
     </div>
-    <button class="btn small" style="width:100%;margin-top:5px" onclick="openInstallment('${i.id}')">${STATE.language === "ur" ? "ترمیم" : "Edit"}</button>
-  </div>`;
-}
-
-async function loadCloudData() {
-  try {
-    const [cRes, dRes, iRes, pRes] = await Promise.all([
-      dbClient.from("customers").select("*"),
-      dbClient.from("deals").select("*"),
-      dbClient.from("installments").select("*"),
-      dbClient.from("payments").select("*")
-    ]);
-
-    if (cRes.error) throw cRes.error;
-    if (dRes.error) throw dRes.error;
-    if (iRes.error) throw iRes.error;
-    if (pRes.error) throw pRes.error;
-
-    if (!cRes.data || cRes.data.length === 0) {
-      await autoSeed();
-      return await loadCloudData();
-    }
-
-    DB = {
-      customers: cRes.data || [],
-      deals: (dRes.data || []).map(d => ({ ...d, customerId: d.customer_id })),
-      installments: (iRes.data || []).map(i => ({ ...i, dealId: i.deal_id })),
-      payments: (pRes.data || []).map(p => ({ ...p, installmentId: p.installment_id }))
-    };
-    render();
-  } catch (err) {
-    console.error(err);
-    document.getElementById("main").innerHTML = `<div class="alert" style="margin:40px"><b>Connection Error:</b> ${err.message}.</div>`;
-  }
-}
-
-async function autoSeed() {
-  const customers = [], deals = [], installments = [];
-  const cMap = {};
-  SEED_DATA.forEach((r, ri) => {
-    if (!cMap[r.client]) {
-      const id = "c_" + Object.keys(cMap).length;
-      cMap[r.client] = { id, name: r.client, phone: "", notes: "" };
-      customers.push(cMap[r.client]);
-    }
-    const dealId = "d_" + ri;
-    deals.push({ id: dealId, customer_id: cMap[r.client].id, owner: r.owner, title: r.deal, total: r.total, created: r.deal.split(" · ")[0] });
-    r.installments.forEach((v, ii) => {
-      installments.push({ id: `${dealId}_${ii}`, deal_id: dealId, qist: v[0], amount: v[1], due: v[2] });
-    });
-  });
-
-  await dbClient.from("customers").upsert(customers);
-  await dbClient.from("deals").upsert(deals);
-  await dbClient.from("installments").upsert(installments);
-}
-
-function renderSidebar() {
-  const q = STATE.search.toLowerCase();
-  const cs = DB.customers.filter(c => (c.name || "").toLowerCase().includes(q));
-  document.getElementById("custList").innerHTML = cs.map(c => {
-    const s = custStats(c.id), active = STATE.activeCustomer === c.id && STATE.view === "customers";
-    return `<div class="cust-item ${active ? "active" : ""}" onclick="selectCustomer('${c.id}')">
-      <div class="avatar" style="background:${OWNER_COLORS[DB.deals.find(d => d.customerId === c.id)?.owner]?.fill || "#555"}">${initials(c.name)}</div>
-      <div class="cust-info"><div class="cust-name">${esc(c.name)}</div><div class="cust-meta">${s.pct}% paid · ${money(s.out)} out</div><div class="mini"><i style="width:${s.pct}%"></i></div></div>
-    </div>`;
-  }).join("") || `<div style="padding:15px;color:#98a2b5;font-size:12px">No customers found.</div>`;
-}
-
-function layout(title, sub, body, actions = "") {
-  return `<div class="topbar"><div class="title"><h2>${title}</h2><p>${sub}</p></div><div class="actions">${languageControl()}<button class="btn mobile-menu" onclick="mobileNav()">☰ Menu</button>${actions}</div></div>${body}`;
-}
-
-function navActive() {
-  document.querySelectorAll(".nav button").forEach(b => { b.classList.toggle("active", b.dataset.view === STATE.view); b.textContent = b.dataset[STATE.language]; });
-  const searchBox = document.getElementById("searchBox");
-  searchBox.placeholder = searchBox.dataset[`placeholder-${STATE.language}`];
-}
-
-function render() {
-  navActive();
-  renderSidebar();
-  let body = "";
-  if (STATE.view === "dashboard") body = dashboard();
-  else if (STATE.view === "customers") body = customers();
-  else body = allQists();
-  document.getElementById("main").innerHTML = body;
-}
-
-function dashboard() {
-  const xs = all(), total = xs.reduce((s, i) => s + Number(i.amount), 0), got = xs.reduce((s, i) => s + Math.min(received(i.id), Number(i.amount)), 0);
-  const overdue = xs.filter(i => status(i) === "overdue"), soon = xs.filter(i => status(i) === "soon"), out = total - got;
-  const owner = ["Self", "Baji", "Ch Tahir"].map(o => {
-    let a = xs.filter(i => i.deal.owner === o), t = a.reduce((s, i) => s + Number(i.amount), 0), p = a.reduce((s, i) => s + Math.min(received(i.id), Number(i.amount)), 0);
-    return { o, t, p, out: t - p };
-  });
-
-  return layout(t("dashboard"), t("liveOverview"),
-    `<div class="stats">
-      <div class="card stat"><label>${STATE.language === "ur" ? "کل کھاتے کی مالیت" : "Total ledger value"}</label><strong>${money(total)}</strong></div>
-      <div class="card stat"><label>${STATE.language === "ur" ? "وصول شدہ" : "Received"}</label><strong class="green">${money(got)}</strong></div>
-      <div class="card stat"><label>${STATE.language === "ur" ? "بقایا" : "Outstanding"}</label><strong class="amber">${money(out)}</strong></div>
-      <div class="card stat"><label>${STATE.language === "ur" ? "واجب الادا قسطیں" : "Overdue qists"}</label><strong class="red">${overdue.length}</strong></div>
-      <div class="card stat"><label>${STATE.language === "ur" ? "7 دن میں واجب" : "Due within 7 days"}</label><strong>${soon.length}</strong></div>
-    </div>
-    ${overdue.length ? `<div class="alert"><b>${overdue.length} overdue qist${overdue.length > 1 ? "s" : ""}</b> · ${money(overdue.reduce((s, i) => s + Number(i.amount) - received(i.id), 0))} outstanding.</div>` : ""}
-    <div class="section"><div class="section-head"><h3>${t("byInvestor")}</h3></div><div class="owner-grid">${owner.map(r => `<div class="card owner"><div><span class="dot" style="background:${OWNER_COLORS[r.o].fill}"></span> <b>${r.o}</b></div><div class="small muted" style="margin-top:12px">Total</div><b>${money(r.t)}</b><div class="small muted" style="margin-top:8px">Received ${money(r.p)}</div><div class="small muted">Outstanding ${money(r.out)}</div></div>`).join("")}</div></div>
-    <div class="section"><div class="section-head"><h3>${t("overdue")}</h3><button class="btn small" onclick="setFilter('overdue')">${t("viewAll")}</button></div><div class="qgrid">${overdue.slice(0, 8).map(qbox).join("") || `<div class="empty">${t("noOverdue")}</div>`}</div></div>
-    <div class="section"><div class="section-head"><h3>${t("dueSoon")}</h3><button class="btn small" onclick="setFilter('soon')">${t("viewAll")}</button></div><div class="qgrid">${soon.slice(0, 8).map(qbox).join("") || `<div class="empty">${t("nothingDue")}</div>`}</div></div>`,
-    `<button class="btn primary" onclick="openCustomer()">${t("addCustomer")}</button><button class="btn" onclick="openDeal()">${t("addDeal")}</button><button class="btn" onclick="syncCloud()">↻ ${t("refresh")}</button>`);
-}
-
-function customers() {
-  if (!STATE.activeCustomer) {
-    const cs = DB.customers;
-    return layout(t("customers"), t("customerCount", cs.length),
-      `<div class="grid">${cs.map(c => {
-        const s = custStats(c.id);
-        return `<div class="card customer-card" onclick="selectCustomer('${c.id}')"><div class="row"><div><b>${esc(c.name)}</b><div class="small muted">${c.phone || "No WhatsApp number"}</div></div><div class="avatar" style="background:${OWNER_COLORS[DB.deals.find(d => d.customerId === c.id)?.owner]?.fill || "#555"}">${initials(c.name)}</div></div><div class="row" style="margin-top:14px"><span class="small muted">${s.pct}% paid</span><b>${money(s.out)}</b></div><div class="progress"><i style="width:${s.pct}%"></i></div><div class="actions" style="margin-top:12px"><button class="btn small" onclick="event.stopPropagation();openCustomer('${c.id}')">Edit</button><button class="btn small danger" onclick="event.stopPropagation();deleteCustomer('${c.id}')">Delete</button></div></div>`;
-      }).join("") || `<div class="empty">${t("noCustomers")}</div>`}</div>`,
-      `<button class="btn primary" onclick="openCustomer()">${t("addCustomer")}</button>`);
-  }
-
-  const c = customer(STATE.activeCustomer), s = custStats(c.id), ds = DB.deals.filter(d => d.customerId === c.id);
-  return layout(t("customer"), t("customerHistory"),
-    `<div class="card header-card"><div class="row"><div><h2>${esc(c.name)}</h2><div class="tags">${[...new Set(ds.map(d => d.owner))].map(o => `<span class="tag" style="background:${OWNER_COLORS[o]?.bg || '#eee'};color:${OWNER_COLORS[o]?.text || '#333'}">${o}</span>`).join("")}</div></div><div class="actions"><button class="btn" onclick="openCustomer('${c.id}')">Edit customer</button><button class="btn primary" onclick="openDeal('${c.id}')">+ Add deal</button></div></div><div class="phone"><div class="field"><label>WhatsApp number</label><input value="${esc(c.phone)}" placeholder="923001234567" onchange="updatePhone('${c.id}',this.value)"></div></div><div class="metrics"><div class="metric"><label>Total tracked</label><strong>${money(s.total)}</strong></div><div class="metric"><label>Received</label><strong class="green">${money(s.got)}</strong></div><div class="metric"><label>Outstanding</label><strong class="amber">${money(s.out)}</strong></div><div class="metric"><label>Progress</label><strong>${s.pct}%</strong></div></div><div class="progress"><i style="width:${s.pct}%"></i></div></div>
-  ${ds.map(d => `<div class="card truck"><div class="truck-head"><div><div class="truck-title">${esc(d.title)}</div><div class="truck-sub">Owner: ${esc(d.owner)} · Total: ${money(d.total)}</div></div><div class="actions"><button class="btn small" onclick="openDeal('${c.id}','${d.id}')">Edit deal</button><button class="btn small danger" onclick="deleteDeal('${d.id}')">Delete</button></div></div><div class="route">${DB.installments.filter(i => i.dealId === d.id).sort((a, b) => a.qist - b.qist).map(i => qbox({ ...i, deal: d, customer: c })).join("")}</div></div>`).join("") || '<div class="empty">No deals for this customer.</div>'}`,
-    `<button class="btn" onclick="setView('customers')">← ${t("backCustomers")}</button>`);
-}
-
-function allQists() {
-  let xs = all();
-  xs = xs.filter(i => STATE.filter === "all" || status(i) === STATE.filter);
-  xs.sort((a, b) => a.due.localeCompare(b.due));
-  const counts = { all: all().length, overdue: 0, soon: 0, paid: 0, future: 0 };
-  all().forEach(i => counts[status(i)]++);
-
-  return layout(t("allQists"), t("everyInstallment"),
-    `<div class="filter">${[["all", "all"], ["overdue", "overdue"], ["soon", "dueSoon"], ["paid", "paid"], ["future", "upcoming"]].map(([k, key]) => `<button class="chip ${STATE.filter === k ? "active" : ""}" onclick="setFilter('${k}')">${t(key)} (${counts[k]})</button>`).join("")}</div><div class="qgrid">${xs.map(i => qbox(i)).join("") || `<div class="empty">${t("noInstallments")}</div>`}</div>`,
-    `<button class="btn primary" onclick="openPayment()">${t("addPayment")}</button>`);
-}
-
-function openModal(content) { document.getElementById("modal").innerHTML = content; document.getElementById("modalBack").classList.add("show"); }
-function closeModal() { document.getElementById("modalBack").classList.remove("show"); }
-document.getElementById("modalBack").addEventListener("click", e => { if (e.target.id === "modalBack") closeModal(); });
-
-function openCustomer(id) {
-  const c = id ? customer(id) : { name: "", phone: "", notes: "" };
-  openModal(`<h3>${id ? "Edit customer" : "Add customer"}</h3><div class="form-grid">
-  <div class="field"><label>Name *</label><input id="fName" value="${esc(c.name)}"></div>
-  <div class="field"><label>WhatsApp</label><input id="fPhone" value="${esc(c.phone)}" placeholder="923001234567"></div>
-  <div class="field full"><label>Notes</label><textarea id="fNotes" rows="3">${esc(c.notes || "")}</textarea></div></div>
-  <div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveCustomer('${id || ""}')">Save</button></div>`);
-}
-
-async function saveCustomer(id) {
-  const name = document.getElementById("fName").value.trim();
-  if (!name) return alert("Customer name is required.");
-  const customerObj = { id: id || uid("c"), name, phone: document.getElementById("fPhone").value.replace(/\D/g, ""), notes: document.getElementById("fNotes").value };
-
-  try {
-    const { error } = await dbClient.from("customers").upsert(customerObj);
-    if (error) throw error;
-    await loadCloudData();
-    if (!id) STATE.activeCustomer = customerObj.id;
-    closeModal();
-    render();
-    toast("Saved to Supabase");
-  } catch (err) { alert("Save error: " + err.message); }
-}
-
-async function deleteCustomer(id) {
-  if (!confirm("Delete this customer and all records permanently?")) return;
-  try {
-    const { error } = await dbClient.from("customers").delete().eq("id", id);
-    if (error) throw error;
-    await loadCloudData();
-    STATE.activeCustomer = null;
-    render();
-    toast("Deleted");
-  } catch (err) { alert("Delete error: " + err.message); }
-}
-
-async function updatePhone(id, val) {
-  const c = customer(id);
-  c.phone = val.replace(/\D/g, "");
-  await dbClient.from("customers").upsert({ id: c.id, phone: c.phone, name: c.name, notes: c.notes });
-  toast("Phone updated");
-}
-
-function openDeal(cid, did) {
-  const d = did ? deal(did) : { owner: "Self", title: "", total: "", created: new Date().toISOString().slice(0, 10) };
-  const ins = did ? DB.installments.filter(i => i.dealId === did).sort((a, b) => a.qist - b.qist) : [];
-  openModal(`<h3>${did ? "Edit deal" : "Add deal"}</h3><div class="form-grid">
-  <div class="field"><label>Customer *</label><select id="dCust">${DB.customers.map(c => `<option value="${c.id}" ${(c.id === (cid || d.customerId)) ? "selected":""}>${esc(c.name)}</option>`).join("")}</select></div>
-  <div class="field"><label>Owner</label><select id="dOwner">${Object.keys(OWNER_COLORS).map(o => `<option ${d.owner === o ? "selected":""}>${o}</option>`).join("")}</select></div>
-  <div class="field"><label>Deal title</label><input id="dTitle" value="${esc(d.title)}" placeholder="10 Aug 2026 · 12 items"></div>
-  <div class="field"><label>Deal total</label><input id="dTotal" type="number" value="${d.total || ""}"></div>
   </div>
-  <div class="section"><div class="section-head"><h3>Installments</h3><button class="btn small" onclick="addInstallmentRow()">+ Add qist</button></div><div id="instRows">${ins.map(rowHtml).join("")}</div></div>
-  <div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveDeal('${did || ""}')">Save deal</button></div>`);
-}
 
-function rowHtml(i = { qist: "", amount: "", due: "" }) {
-  return `<div class="form-grid inst-row" style="margin-bottom:8px">
-    <div class="field"><label>Qist</label><input class="iq" type="number" value="${i.qist}"></div>
-    <div class="field"><label>Amount</label><input class="ia" type="number" value="${i.amount}"></div>
-    <div class="field"><label>Due date</label><input class="idate" type="date" value="${i.due}"></div>
-    <button class="btn small danger" style="align-self:end;height:38px" onclick="this.parentElement.remove()">Remove</button>
-  </div>`;
-}
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><h1>Maal Ledger</h1><p>Supabase Live Cloud</p></div>
+      <nav class="nav">
+        <button data-view="dashboard" class="active">Dashboard</button>
+        <button data-view="customers">Customers</button>
+        <button data-view="all">All Qists</button>
+      </nav>
+      <div class="side-search"><input id="searchBox" placeholder="Search customer..."></div>
+      <div class="cust-list" id="custList"></div>
+    </aside>
+    <main class="main" id="main">
+      <div class="loading-box">Connecting to Supabase...</div>
+    </main>
+  </div>
 
-function addInstallmentRow() {
-  document.getElementById("instRows").insertAdjacentHTML("beforeend", rowHtml());
-}
+  <div class="modal-back" id="modalBack"><div class="modal" id="modal"></div></div>
+  <div class="toast" id="toast"></div>
 
-async function saveDeal(did) {
-  const customerId = document.getElementById("dCust").value;
-  const owner = document.getElementById("dOwner").value;
-  const title = document.getElementById("dTitle").value.trim();
-  const total = Number(document.getElementById("dTotal").value) || 0;
-  const rows = [...document.querySelectorAll(".inst-row")].map(r => ({
-    qist: Number(r.querySelector(".iq").value),
-    amount: Number(r.querySelector(".ia").value),
-    due: r.querySelector(".idate").value
-  })).filter(x => x.qist && x.amount && x.due);
-
-  if (!customerId || !title || !rows.length) return alert("Customer, title, and installments are required.");
-
-  const dealId = did || uid("d");
-  try {
-    const { error: dErr } = await dbClient.from("deals").upsert({ id: dealId, customer_id: customerId, owner, title, total, created: new Date().toISOString().slice(0, 10) });
-    if (dErr) throw dErr;
-
-    await dbClient.from("installments").delete().eq("deal_id", dealId);
-    const { error: iErr } = await dbClient.from("installments").insert(rows.map((r, n) => ({ id: `${dealId}_${n}`, deal_id: dealId, qist: r.qist, amount: r.amount, due: r.due })));
-    if (iErr) throw iErr;
-
-    await loadCloudData();
-    STATE.activeCustomer = customerId;
-    closeModal();
-    render();
-    toast("Deal saved");
-  } catch (err) { alert("Save error: " + err.message); }
-}
-
-async function deleteDeal(id) {
-  if (!confirm("Delete this deal permanently?")) return;
-  try {
-    const { error } = await dbClient.from("deals").delete().eq("id", id);
-    if (error) throw error;
-    await loadCloudData();
-    render();
-    toast("Deal deleted");
-  } catch (err) { alert("Delete error: " + err.message); }
-}
-
-function openInstallment(id) {
-  const i = DB.installments.find(x => x.id === id), p = paymentsFor(id);
-  openModal(`<h3>Edit installment</h3><div class="form-grid">
-  <div class="field"><label>Qist number</label><input id="eiq" type="number" value="${i.qist}"></div>
-  <div class="field"><label>Amount</label><input id="eia" type="number" value="${i.amount}"></div>
-  <div class="field"><label>Due date</label><input id="eid" type="date" value="${i.due}"></div>
-  </div><div class="payment-list">${p.length ? `<b>Payment history</b>${p.map(x => `<div class="payment">${dateFmt(x.date)} · ${money(x.amount)} · ${esc(x.method || "Cash")} ${x.note ? "· " + esc(x.note) : ""}</div>`).join("")}` : "<span class='muted small'>No payments recorded.</span>"}</div>
-  <div class="modal-actions"><button class="btn danger" onclick="deleteInstallment('${id}')">Delete</button><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveInstallment('${id}')">Save</button></div>`);
-}
-
-async function saveInstallment(id) {
-  const qist = Number(document.getElementById("eiq").value);
-  const amount = Number(document.getElementById("eia").value);
-  const due = document.getElementById("eid").value;
-  try {
-    const { error } = await dbClient.from("installments").update({ qist, amount, due }).eq("id", id);
-    if (error) throw error;
-    await loadCloudData();
-    closeModal();
-    render();
-    toast("Installment updated");
-  } catch (err) { alert("Update error: " + err.message); }
-}
-
-async function deleteInstallment(id) {
-  if (!confirm("Delete this installment?")) return;
-  try {
-    const { error } = await dbClient.from("installments").delete().eq("id", id);
-    if (error) throw error;
-    await loadCloudData();
-    closeModal();
-    render();
-    toast("Installment deleted");
-  } catch (err) { alert("Delete error: " + err.message); }
-}
-
-function openPayment(id) {
-  const i = id ? DB.installments.find(x => x.id === id) : null, xs = i ? [i] : DB.installments;
-  openModal(`<h3>Record payment</h3><div class="form-grid">
-  <div class="field full"><label>Installment *</label><select id="pInst">${xs.map(x => { const d = deal(x.dealId), c = customer(d?.customerId); return `<option value="${x.id}">${esc(c?.name)} · Qist ${x.qist} · ${money(x.amount)} · ${dateFmt(x.due)}</option>`; }).join("")}</select></div>
-  <div class="field"><label>Amount received *</label><input id="pAmt" type="number" value="${i ? Math.max(0, i.amount - received(i.id)) : ""}"></div>
-  <div class="field"><label>Payment date</label><input id="pDate" type="date" value="${new Date().toISOString().slice(0, 10)}"></div>
-  <div class="field"><label>Method</label><select id="pMethod"><option>Cash</option><option>Bank transfer</option><option>Cheque</option><option>Other</option></select></div>
-  <div class="field"><label>Reference</label><input id="pRef" placeholder="Optional"></div>
-  </div><div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="savePayment()">Save payment</button></div>`);
-}
-
-async function savePayment() {
-  const id = document.getElementById("pInst").value, i = DB.installments.find(x => x.id === id), amt = Number(document.getElementById("pAmt").value);
-  if (!amt || amt <= 0) return alert("Enter a valid payment amount.");
-  if (received(id) + amt > i.amount && !confirm("This payment exceeds the installment amount. Continue?")) return;
-
-  const paymentObj = {
-    id: uid("p"),
-    installment_id: id,
-    amount: amt,
-    date: document.getElementById("pDate").value,
-    method: document.getElementById("pMethod").value,
-    note: document.getElementById("pRef").value.trim()
-  };
-
-  try {
-    const { error } = await dbClient.from("payments").insert(paymentObj);
-    if (error) throw error;
-    await loadCloudData();
-    closeModal();
-    render();
-    toast("Payment recorded to cloud");
-  } catch (err) { alert("Save error: " + err.message); }
-}
-
-function setFilter(f) { STATE.filter = f; STATE.view = "all"; render(); }
-function setView(v) { STATE.view = v; STATE.activeCustomer = null; render(); }
-function selectCustomer(id) { STATE.activeCustomer = id; STATE.view = "customers"; render(); }
-function mobileNav() { document.querySelector(".sidebar").style.display = "flex"; }
-async function syncCloud() { toast("Syncing..."); await loadCloudData(); toast("Up to date"); }
-
-document.querySelectorAll(".nav button").forEach(b => b.onclick = () => { STATE.view = b.dataset.view; STATE.activeCustomer = null; render(); });
-document.getElementById("searchBox").oninput = e => { STATE.search = e.target.value; renderSidebar(); };
-document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
-
-loadCloudData();
-</script>
+  <!-- Your Modular Scripts (Order is critical!) -->
+  <script src="js/supabase-config.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>

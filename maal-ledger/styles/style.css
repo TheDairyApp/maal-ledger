@@ -106,3 +106,26 @@ button{cursor:pointer}
 @media(max-width:1100px){.stats{grid-template-columns:repeat(3,1fr)}.owner-grid{grid-template-columns:1fr}}
 @media(max-width:800px){.sidebar{display:none}.main{margin-left:0;padding:18px 14px 50px}.mobile-menu{display:block}.stats{grid-template-columns:repeat(2,1fr)}.form-grid{grid-template-columns:1fr}.full{grid-column:auto}.topbar{align-items:flex-start}.title h2{font-size:21px}}
 @media(max-width:480px){.stats{grid-template-columns:1fr 1fr}.stat strong{font-size:17px}.actions .btn{padding:8px 9px}.qgrid{grid-template-columns:1fr 1fr}}
+
+/* --- LOGIN UI --- */
+.login-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--page); /* Matches your app's background */
+  z-index: 9999; /* Sits on top of everything */
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  padding: 35px 30px;
+}
+
+/* Hide the overlay once logged in */
+.login-overlay.hidden {
+  display: none;
+}
+
