@@ -120,7 +120,6 @@ function render() {
   let body = "";
   if (STATE.view === "dashboard") body = dashboard();
   else if (STATE.view === "customers") body = customers();
-  else if (STATE.view === "trucks") body = trucksView(); // Routing to our new view
   else body = allQists();
   document.getElementById("main").innerHTML = body;
 }
@@ -167,76 +166,13 @@ function customers() {
 }
 
 
-// --- TRUCKS LOGISTICS VIEW ---
-function trucksView() {
-  const ts = DB.trucks || [];
-  return layout("Trucks & Logistics", "Manage shipments and compute net margins",
-    `<div class="grid">${ts.map(t => {
-      // Calculate total cost (purchase + expenses) to display
-      const totalCost = (Number(t.purchase_price) || 0) + (Number(t.expenses) || 0);
-      
-      return `<div class="card customer-card" onclick="openTruck('${t.id}')">
-        <div class="row">
-          <div><b>${esc(t.truck_number)}</b><div class="small muted">${t.cows_count || 0} cows</div></div>
-        </div>
-        <div class="metrics" style="margin-top:16px; gap: 15px;">
-          <div class="metric"><label>Total Cost</label><strong>${money(totalCost)}</strong></div>
-          <div class="metric"><label>Sales</label><strong class="green">${money(t.sale_price)}</strong></div>
-          <div class="metric"><label>Net Margin</label><strong class="${t.profit >= 0 ? 'green' : 'red'}">${money(t.profit)}</strong></div>
-        </div>
-        <div class="actions" style="margin-top:16px">
-          <button class="btn small" onclick="event.stopPropagation();openTruck('${t.id}')">Edit Truck</button>
-          <button class="btn small danger" onclick="event.stopPropagation();deleteTruckRecord('${t.id}')">Delete</button>
-        </div>
-      </div>`;
-    }).join("") || '<div class="empty">No truck shipments recorded yet.</div>'}</div>`,
-    `<button class="btn primary" onclick="openTruck()">+ Add Truck</button>`);
-}
 
-function openTruck(id) {
-  const t = id ? DB.trucks.find(x => x.id === id) : { truck_number: "", cows_count: "", purchase_price: "", sale_price: "", expenses: "" };
-  
-  openModal(`<h3>${id ? "Edit Shipment" : "Add New Truck"}</h3><div class="form-grid">
-  <div class="field full"><label>Truck Number / Batch ID *</label><input id="tNum" value="${esc(t.truck_number)}" placeholder="e.g. TX-409"></div>
-  <div class="field"><label>Total Cows</label><input id="tCows" type="number" value="${t.cows_count}"></div>
-  <div class="field"><label>Purchase Price</label><input id="tPurch" type="number" value="${t.purchase_price}"></div>
-  <div class="field"><label>Logistics / Expenses</label><input id="tExp" type="number" value="${t.expenses}"></div>
-  <div class="field"><label>Total Sale Price</label><input id="tSale" type="number" value="${t.sale_price}"></div>
-  </div>
-  <div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveTruck('${id || ""}')">Save Shipment</button></div>`);
-}
 
-async function saveTruck(id) {
-  const truck_number = document.getElementById("tNum").value.trim();
-  if (!truck_number) return alert("Truck Number/ID is required.");
-  
-  const truckObj = {
-    id: id || uid("t"),
-    truck_number,
-    cows_count: Number(document.getElementById("tCows").value) || 0,
-    purchase_price: Number(document.getElementById("tPurch").value) || 0,
-    sale_price: Number(document.getElementById("tSale").value) || 0,
-    expenses: Number(document.getElementById("tExp").value) || 0
-  };
 
-  try {
-    await dbUpsertTruck(truckObj);
-    await loadDataFromSupabase();
-    closeModal();
-    render();
-    toast("Truck data secured");
-  } catch (err) { alert("Save error: " + err.message); }
-}
 
-async function deleteTruckRecord(id) {
-  if (!confirm("Permanently delete this truck's financial record?")) return;
-  try {
-    await dbDeleteTruck(id);
-    await loadDataFromSupabase();
-    render();
-    toast("Truck deleted");
-  } catch (err) { alert("Delete error: " + err.message); }
-}
+
+
+
 
 function allQists() {
   let xs = all();

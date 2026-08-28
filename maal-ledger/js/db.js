@@ -1,5 +1,5 @@
 let OWNER_COLORS = {}; // We will now fill this dynamically from the database
-let DB = { customers: [], deals: [], installments: [], payments: [], investors: [], trucks: [] };
+let DB = { customers: [], deals: [], installments: [], payments: [], investors: []};
 
 
 const SEED_DATA = [
@@ -16,7 +16,6 @@ const SEED_DATA = [
 ];
 
 
-
 function uid(prefix) {
   return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
@@ -31,7 +30,6 @@ const [cRes, dRes, iRes, pRes, invRes, tRes] = await Promise.all([
       dbClient.from("installments").select("*"),
       dbClient.from("payments").select("*"),
       dbClient.from("investors").select("*"),
-      dbClient.from("trucks").select("*") // <-- Fetching the new trucks table
     ]);
 
     if (cRes.error) throw cRes.error;
@@ -39,7 +37,6 @@ const [cRes, dRes, iRes, pRes, invRes, tRes] = await Promise.all([
     if (iRes.error) throw iRes.error;
     if (pRes.error) throw pRes.error;
     if (invRes.error) throw invRes.error;
-    if (tRes.error) throw tRes.error; // <-- Catch truck errors
 
     // If Supabase database is empty on first run, auto-seed with original records
     if (!cRes.data || cRes.data.length === 0) {
@@ -49,11 +46,10 @@ const [cRes, dRes, iRes, pRes, invRes, tRes] = await Promise.all([
 
 DB = {
       customers: cRes.data || [],
-      deals: (dRes.data || []).map(d => ({ ...d, customerId: d.customer_id, truckId: d.truck_id })),
+      deals: (dRes.data || []).map(d => ({ ...d, customerId: d.customer_id })),
       installments: (iRes.data || []).map(i => ({ ...i, dealId: i.deal_id })),
       payments: (pRes.data || []).map(p => ({ ...p, installmentId: p.installment_id })),
       investors: invRes.data || [],
-      trucks: tRes.data || [] // <-- Save trucks to global state
     };
 
     // Dynamically build the colors for the UI based on the database records
@@ -176,19 +172,3 @@ async function dbInsertPayment(payment) {
   if (error) throw error;
 }
 
-async function dbUpsertTruck(truck) {
-  const { error } = await dbClient.from("trucks").upsert({
-    id: truck.id,
-    truck_number: truck.truck_number,
-    cows_count: truck.cows_count,
-    purchase_price: truck.purchase_price,
-    sale_price: truck.sale_price,
-    expenses: truck.expenses
-  });
-  if (error) throw error;
-}
-
-async function dbDeleteTruck(id) {
-  const { error } = await dbClient.from("trucks").delete().eq("id", id);
-  if (error) throw error;
-}
