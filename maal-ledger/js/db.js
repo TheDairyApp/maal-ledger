@@ -1,8 +1,6 @@
-const OWNER_COLORS = {
-  "Self": { fill: "#0F766E", bg: "#E4F5F1", text: "#0B5A54" },
-  "Baji": { fill: "#B45309", bg: "#FFF1DE", text: "#8A4108" },
-  "Ch Tahir": { fill: "#6D28D9", bg: "#EEE8FC", text: "#5420AE" }
-};
+let OWNER_COLORS = {}; // We will now fill this dynamically from the database
+let DB = { customers: [], deals: [], installments: [], payments: [], investors: [], trucks: [] };
+
 
 const SEED_DATA = [
   { owner: "Self", client: "Samdani", deal: "10 Aug 2026 · 12 items", total: 6530000, installments: [[1, 1088500, "2026-09-10"], [2, 1088500, "2026-10-10"], [3, 1088500, "2026-11-10"], [4, 1088500, "2026-12-10"], [5, 1088000, "2027-01-10"], [6, 1088000, "2027-02-10"]] },
@@ -17,7 +15,7 @@ const SEED_DATA = [
   { owner: "Ch Tahir", client: "Mubin", deal: "20 May 2026 · 4 items", total: 2493000, installments: [[3, 498600, "2026-08-23"], [4, 498600, "2026-09-23"], [5, 498600, "2026-10-23"]] }
 ];
 
-let DB = { customers: [], deals: [], installments: [], payments: [] };
+
 
 function uid(prefix) {
   return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -26,17 +24,22 @@ function uid(prefix) {
 // Fetch all tables from Supabase
 async function loadDataFromSupabase() {
   try {
-    const [cRes, dRes, iRes, pRes] = await Promise.all([
+
+const [cRes, dRes, iRes, pRes, invRes, tRes] = await Promise.all([
       dbClient.from("customers").select("*"),
       dbClient.from("deals").select("*"),
       dbClient.from("installments").select("*"),
-      dbClient.from("payments").select("*")
+      dbClient.from("payments").select("*"),
+      dbClient.from("investors").select("*"),
+      dbClient.from("trucks").select("*") // <-- Fetching the new trucks table
     ]);
 
     if (cRes.error) throw cRes.error;
     if (dRes.error) throw dRes.error;
     if (iRes.error) throw iRes.error;
     if (pRes.error) throw pRes.error;
+    if (invRes.error) throw invRes.error;
+    if (tRes.error) throw tRes.error; // <-- Catch truck errors
 
     // If Supabase database is empty on first run, auto-seed with original records
     if (!cRes.data || cRes.data.length === 0) {
@@ -44,12 +47,22 @@ async function loadDataFromSupabase() {
       return await loadDataFromSupabase();
     }
 
-    DB = {
+DB = {
       customers: cRes.data || [],
-      deals: (dRes.data || []).map(d => ({ ...d, customerId: d.customer_id })),
+      deals: (dRes.data || []).map(d => ({ ...d, customerId: d.customer_id, truckId: d.truck_id })),
       installments: (iRes.data || []).map(i => ({ ...i, dealId: i.deal_id })),
-      payments: (pRes.data || []).map(p => ({ ...p, installmentId: p.installment_id }))
+      payments: (pRes.data || []).map(p => ({ ...p, installmentId: p.installment_id })),
+      investors: invRes.data || [],
+      trucks: tRes.data || [] // <-- Save trucks to global state
     };
+
+    // Dynamically build the colors for the UI based on the database records
+    OWNER_COLORS = {};
+    DB.investors.forEach(inv => {
+      OWNER_COLORS[inv.name] = { fill: inv.fill_color, bg: inv.bg_color, text: inv.text_color };
+    });
+
+
 
     return DB;
   } catch (err) {
@@ -160,5 +173,22 @@ async function dbInsertPayment(payment) {
     method: payment.method,
     note: payment.note
   });
+  if (error) throw error;
+}
+
+async function dbUpsertTruck(truck) {
+  const { error } = await dbClient.from("trucks").upsert({
+    id: truck.id,
+    truck_number: truck.truck_number,
+    cows_count: truck.cows_count,
+    purchase_price: truck.purchase_price,
+    sale_price: truck.sale_price,
+    expenses: truck.expenses
+  });
+  if (error) throw error;
+}
+
+async function dbDeleteTruck(id) {
+  const { error } = await dbClient.from("trucks").delete().eq("id", id);
   if (error) throw error;
 }

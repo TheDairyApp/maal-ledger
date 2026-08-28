@@ -45,13 +45,22 @@
   <div class="app">
     <aside class="sidebar">
       <div class="brand"><h1>Maal Ledger</h1><p>Supabase Live Cloud</p></div>
-      <nav class="nav">
+<nav class="nav">
         <button data-view="dashboard" class="active">Dashboard</button>
         <button data-view="customers">Customers</button>
+        <button data-view="trucks">Trucks</button>
         <button data-view="all">All Qists</button>
       </nav>
       <div class="side-search"><input id="searchBox" placeholder="Search customer..."></div>
       <div class="cust-list" id="custList"></div>
+
+    <!-- Add this right before </aside> -->
+    <div style="padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
+      <button class="btn small" onclick="handleSignOut()" style="width: 100%; background: rgba(255,255,255,0.05); color: #fca5a5; border: 1px solid #fca5a555;">
+        Sign Out
+      </button>
+    </div>
+  
     </aside>
     <main class="main" id="main">
       <div class="loading-box">Connecting to Supabase...</div>

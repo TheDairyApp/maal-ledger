@@ -34,6 +34,27 @@ async function handleLogin() {
 }
 
 
+async function handleSignOut() {
+  toast("Signing out...");
+  const { error } = await dbClient.auth.signOut();
+  
+  if (error) {
+    alert("Error signing out: " + error.message);
+  } else {
+    // Show the login screen again
+    document.getElementById("loginOverlay").classList.remove("hidden");
+    
+    // Clear the current app state from memory
+    document.getElementById("loginEmail").value = "";
+    document.getElementById("loginPassword").value = "";
+    document.getElementById("loginError").textContent = "";
+    
+    STATE.activeCustomer = null;
+    document.getElementById("main").innerHTML = ""; // Clear dashboard view
+  }
+}
+
+
 function money(n) { return "Rs " + Math.round(Number(n) || 0).toLocaleString("en-IN"); }
 function dateFmt(d) { if (!d) return "—"; return new Date(d + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }); }
 function daysUntil(d) { const a = new Date(); a.setHours(0, 0, 0, 0); return Math.round((new Date(d + "T00:00:00") - a) / 86400000); }
@@ -99,6 +120,7 @@ function render() {
   let body = "";
   if (STATE.view === "dashboard") body = dashboard();
   else if (STATE.view === "customers") body = customers();
+  else if (STATE.view === "trucks") body = trucksView(); // Routing to our new view
   else body = allQists();
   document.getElementById("main").innerHTML = body;
 }
@@ -106,7 +128,7 @@ function render() {
 function dashboard() {
   const xs = all(), total = xs.reduce((s, i) => s + Number(i.amount), 0), got = xs.reduce((s, i) => s + Math.min(received(i.id), Number(i.amount)), 0);
   const overdue = xs.filter(i => status(i) === "overdue"), soon = xs.filter(i => status(i) === "soon"), out = total - got;
-  const owner = ["Self", "Baji", "Ch Tahir"].map(o => {
+  const owner = DB.investors.map(inv => inv.name).map(o => {
     let a = xs.filter(i => i.deal.owner === o), t = a.reduce((s, i) => s + Number(i.amount), 0), p = a.reduce((s, i) => s + Math.min(received(i.id), Number(i.amount)), 0);
     return { o, t, p, out: t - p };
   });
@@ -142,6 +164,78 @@ function customers() {
     `<div class="card header-card"><div class="row"><div><h2>${esc(c.name)}</h2><div class="tags">${[...new Set(ds.map(d => d.owner))].map(o => `<span class="tag" style="background:${OWNER_COLORS[o]?.bg || '#eee'};color:${OWNER_COLORS[o]?.text || '#333'}">${o}</span>`).join("")}</div></div><div class="actions"><button class="btn" onclick="openCustomer('${c.id}')">Edit customer</button><button class="btn primary" onclick="openDeal('${c.id}')">+ Add deal</button></div></div><div class="phone"><div class="field"><label>WhatsApp number</label><input value="${esc(c.phone)}" placeholder="923001234567" onchange="updatePhone('${c.id}',this.value)"></div></div><div class="metrics"><div class="metric"><label>Total tracked</label><strong>${money(s.total)}</strong></div><div class="metric"><label>Received</label><strong class="green">${money(s.got)}</strong></div><div class="metric"><label>Outstanding</label><strong class="amber">${money(s.out)}</strong></div><div class="metric"><label>Progress</label><strong>${s.pct}%</strong></div></div><div class="progress"><i style="width:${s.pct}%"></i></div></div>
   ${ds.map(d => `<div class="card truck"><div class="truck-head"><div><div class="truck-title">${esc(d.title)}</div><div class="truck-sub">Owner: ${esc(d.owner)} · Deal total: ${money(d.total)}</div></div><div class="actions"><button class="btn small" onclick="openDeal('${c.id}','${d.id}')">Edit deal</button><button class="btn small danger" onclick="deleteDeal('${d.id}')">Delete</button></div></div><div class="route">${DB.installments.filter(i => i.dealId === d.id).sort((a, b) => a.qist - b.qist).map(i => qbox({ ...i, deal: d, customer: c })).join("")}</div></div>`).join("") || '<div class="empty">No deals for this customer.</div>'}`,
     `<button class="btn" onclick="setView('customers')">← Customers</button>`);
+}
+
+
+// --- TRUCKS LOGISTICS VIEW ---
+function trucksView() {
+  const ts = DB.trucks || [];
+  return layout("Trucks & Logistics", "Manage shipments and compute net margins",
+    `<div class="grid">${ts.map(t => {
+      // Calculate total cost (purchase + expenses) to display
+      const totalCost = (Number(t.purchase_price) || 0) + (Number(t.expenses) || 0);
+      
+      return `<div class="card customer-card" onclick="openTruck('${t.id}')">
+        <div class="row">
+          <div><b>${esc(t.truck_number)}</b><div class="small muted">${t.cows_count || 0} cows</div></div>
+        </div>
+        <div class="metrics" style="margin-top:16px; gap: 15px;">
+          <div class="metric"><label>Total Cost</label><strong>${money(totalCost)}</strong></div>
+          <div class="metric"><label>Sales</label><strong class="green">${money(t.sale_price)}</strong></div>
+          <div class="metric"><label>Net Margin</label><strong class="${t.profit >= 0 ? 'green' : 'red'}">${money(t.profit)}</strong></div>
+        </div>
+        <div class="actions" style="margin-top:16px">
+          <button class="btn small" onclick="event.stopPropagation();openTruck('${t.id}')">Edit Truck</button>
+          <button class="btn small danger" onclick="event.stopPropagation();deleteTruckRecord('${t.id}')">Delete</button>
+        </div>
+      </div>`;
+    }).join("") || '<div class="empty">No truck shipments recorded yet.</div>'}</div>`,
+    `<button class="btn primary" onclick="openTruck()">+ Add Truck</button>`);
+}
+
+function openTruck(id) {
+  const t = id ? DB.trucks.find(x => x.id === id) : { truck_number: "", cows_count: "", purchase_price: "", sale_price: "", expenses: "" };
+  
+  openModal(`<h3>${id ? "Edit Shipment" : "Add New Truck"}</h3><div class="form-grid">
+  <div class="field full"><label>Truck Number / Batch ID *</label><input id="tNum" value="${esc(t.truck_number)}" placeholder="e.g. TX-409"></div>
+  <div class="field"><label>Total Cows</label><input id="tCows" type="number" value="${t.cows_count}"></div>
+  <div class="field"><label>Purchase Price</label><input id="tPurch" type="number" value="${t.purchase_price}"></div>
+  <div class="field"><label>Logistics / Expenses</label><input id="tExp" type="number" value="${t.expenses}"></div>
+  <div class="field"><label>Total Sale Price</label><input id="tSale" type="number" value="${t.sale_price}"></div>
+  </div>
+  <div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveTruck('${id || ""}')">Save Shipment</button></div>`);
+}
+
+async function saveTruck(id) {
+  const truck_number = document.getElementById("tNum").value.trim();
+  if (!truck_number) return alert("Truck Number/ID is required.");
+  
+  const truckObj = {
+    id: id || uid("t"),
+    truck_number,
+    cows_count: Number(document.getElementById("tCows").value) || 0,
+    purchase_price: Number(document.getElementById("tPurch").value) || 0,
+    sale_price: Number(document.getElementById("tSale").value) || 0,
+    expenses: Number(document.getElementById("tExp").value) || 0
+  };
+
+  try {
+    await dbUpsertTruck(truckObj);
+    await loadDataFromSupabase();
+    closeModal();
+    render();
+    toast("Truck data secured");
+  } catch (err) { alert("Save error: " + err.message); }
+}
+
+async function deleteTruckRecord(id) {
+  if (!confirm("Permanently delete this truck's financial record?")) return;
+  try {
+    await dbDeleteTruck(id);
+    await loadDataFromSupabase();
+    render();
+    toast("Truck deleted");
+  } catch (err) { alert("Delete error: " + err.message); }
 }
 
 function allQists() {
