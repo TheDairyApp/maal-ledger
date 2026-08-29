@@ -188,6 +188,15 @@ async function doLogin() {
 async function startApp() {
   applyNavLanguage();
   applyTheme(document.documentElement.getAttribute("data-theme") || "light");
+  
+  // 1. Instantly load the dashboard from the browser's memory
+  const cached = localStorage.getItem("maal_cache");
+  if (cached) {
+    DB = JSON.parse(cached);
+    render(); 
+  }
+  
+  // 2. Silently fetch any fresh updates in the background without freezing the screen
   await loadDataFromSupabase();
   render();
 }
@@ -376,14 +385,14 @@ async function saveInvestor(id) {
   if (!name) return alert("Investor name is required.");
   const fill = document.getElementById("vFill").value;
   const investorObj = { id: id || uid("inv"), name, type: document.getElementById("vType").value, fill, bg: fill + "22", textColor: fill, notes: document.getElementById("vNotes").value.trim() };
-  try { await dbUpsertInvestor(investorObj); await loadDataFromSupabase(); closeModal(); render(); toast("Investor saved"); }
+  try { await dbUpsertInvestor(investorObj); closeModal(); render(); toast("Investor saved"); }
   catch (err) { alert("Failed to save investor: " + err.message); }
 }
 
 async function deleteInvestor(id) {
   if (DB.deals.some(d => d.investorId === id)) return alert("Can't delete: this investor is linked to existing deals. Reassign those first.");
   if (!confirm("Delete this investor?")) return;
-  try { await dbDeleteInvestor(id); await loadDataFromSupabase(); closeModal(); render(); toast("Investor deleted"); }
+  try { await dbDeleteInvestor(id); closeModal(); render(); toast("Investor deleted"); }
   catch (err) { alert("Delete failed: " + err.message); }
 }
 
@@ -404,14 +413,14 @@ async function savePayout(investorId) {
   if (!amount || amount <= 0) return alert("Enter a valid payout amount.");
   try {
     await dbInsertPayout({ id: uid("po"), investorId, amount, date, notes });
-    await loadDataFromSupabase();
+    
     closeModal(); render(); toast("Payout recorded");
   } catch (err) { alert("Failed to record payout: " + err.message); }
 }
 
 async function deletePayout(id) {
   if (!confirm("Delete this payout record?")) return;
-  try { await dbDeletePayout(id); await loadDataFromSupabase(); render(); toast("Payout deleted"); }
+  try { await dbDeletePayout(id);  render(); toast("Payout deleted"); }
   catch (err) { alert("Delete failed: " + err.message); }
 }
 
@@ -460,7 +469,7 @@ async function saveClient(id) {
   if (!name) return alert("Client name is required.");
   const clientObj = { id: id || uid("cl"), name, phone: document.getElementById("fPhone").value.trim(), notes: document.getElementById("fNotes").value.trim() };
   try {
-    await dbUpsertClient(clientObj); await loadDataFromSupabase();
+    await dbUpsertClient(clientObj); 
     if (!id) STATE.activeClient = clientObj.id;
     closeModal(); render(); toast("Client saved");
   } catch (err) { alert("Failed to save: " + err.message); }
@@ -468,7 +477,7 @@ async function saveClient(id) {
 
 async function deleteClient(id) {
   if (!confirm("Delete this client and all their deals/qists permanently?")) return;
-  try { await dbDeleteClient(id); await loadDataFromSupabase(); STATE.activeClient = null; render(); toast("Client deleted"); }
+  try { await dbDeleteClient(id); STATE.activeClient = null; render(); toast("Client deleted"); }
   catch (err) { alert("Delete failed: " + err.message); }
 }
 
@@ -526,7 +535,7 @@ async function saveDeal(did) {
 
   try {
     await dbUpsertDeal(dealObj, newRows);
-    await loadDataFromSupabase();
+    
     STATE.activeClient = clientId;
     closeModal(); render(); toast("Deal saved");
   } catch (err) { alert("Failed saving deal: " + err.message); }
@@ -534,7 +543,7 @@ async function saveDeal(did) {
 
 async function deleteDeal(id) {
   if (!confirm("Delete this deal and all its qists/cashbook history permanently?")) return;
-  try { await dbDeleteDeal(id); await loadDataFromSupabase(); render(); toast("Deal deleted"); }
+  try { await dbDeleteDeal(id); render(); toast("Deal deleted"); }
   catch (err) { alert("Delete failed: " + err.message); }
 }
 
@@ -550,13 +559,13 @@ function openQist(id) {
 async function saveQist(id) {
   const amount = Number(document.getElementById("eqa").value);
   const expectedDate = document.getElementById("eqd").value;
-  try { await dbUpdateQist({ id, amount, expectedDate }); await loadDataFromSupabase(); closeModal(); render(); toast("Qist updated"); }
+  try { await dbUpdateQist({ id, amount, expectedDate }); closeModal(); render(); toast("Qist updated"); }
   catch (err) { alert("Failed update: " + err.message); }
 }
 
 async function deleteQist(id) {
   if (!confirm("Delete this qist and its payment history?")) return;
-  try { await dbDeleteQist(id); await loadDataFromSupabase(); closeModal(); render(); toast("Qist deleted"); }
+  try { await dbDeleteQist(id); closeModal(); render(); toast("Qist deleted"); }
   catch (err) { alert("Failed delete: " + err.message); }
 }
 
@@ -580,7 +589,7 @@ async function savePayment() {
   if (!amt || amt <= 0) return alert("Enter a valid payment amount.");
   const q = DB.qists.find(x => x.id === id);
   if (Number(q.receivedAmount || 0) + amt > Number(q.amount) && !confirm("This exceeds the qist amount. Continue?")) return;
-  try { await dbRecordQistPayment(id, amt, date, note); await loadDataFromSupabase(); closeModal(); render(); toast("Payment recorded"); }
+  try { await dbRecordQistPayment(id, amt, date, note); closeModal(); render(); toast("Payment recorded"); }
   catch (err) { alert("Failed saving payment: " + err.message); }
 }
 
