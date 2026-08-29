@@ -1,64 +1,66 @@
-let OWNER_COLORS = {}; // We will now fill this dynamically from the database
-let DB = { customers: [], deals: [], installments: [], payments: [], investors: []};
+// ============================================================
+// Maal Ledger — data layer (js/db.js)
+// All Supabase reads/writes live here. app.js never touches
+// dbClient directly — it calls the functions below.
+// Assumes supabase-config.js has already created `dbClient`.
+// ============================================================
 
-
-const SEED_DATA = [
-  { owner: "Self", client: "Samdani", deal: "10 Aug 2026 · 12 items", total: 6530000, installments: [[1, 1088500, "2026-09-10"], [2, 1088500, "2026-10-10"], [3, 1088500, "2026-11-10"], [4, 1088500, "2026-12-10"], [5, 1088000, "2027-01-10"], [6, 1088000, "2027-02-10"]] },
-  { owner: "Self", client: "Mufti Amir c/o Arif", deal: "1 Aug 2026 · 6 items", total: 3000000, installments: [[1, 1000000, "2026-09-01"], [2, 1000000, "2026-10-01"], [3, 1000000, "2026-11-01"]] },
-  { owner: "Self", client: "Noman Yahya", deal: "8 Apr 2026 · 12 items", total: 7200000, installments: [[4, 1440000, "2026-08-10"], [5, 1440000, "2026-09-10"]] },
-  { owner: "Self", client: "Noman Yahya", deal: "5 Aug 2026 · 6 items", total: 3752000, installments: [[1, 750400, "2026-09-05"], [2, 750400, "2026-10-05"], [3, 750400, "2026-11-05"], [4, 750400, "2026-12-05"], [5, 750400, "2027-01-05"]] },
-  { owner: "Self", client: "Mubeen Memon", deal: "18 May 2026 · 12 items", total: 6980000, installments: [[3, 1396000, "2026-08-20"], [4, 1396000, "2026-09-20"], [5, 1396000, "2026-10-20"]] },
-  { owner: "Self", client: "Arif 10 / Fahad", deal: "12 May 2026 · 6 items", total: 3278000, installments: [[3, 655600, "2026-08-23"], [4, 655600, "2026-09-23"], [5, 655600, "2026-10-23"]] },
-  { owner: "Self", client: "Arif 9", deal: "1 Apr 2026 · 3 items", total: 1507500, installments: [[4, 301500, "2026-08-15"], [5, 301500, "2026-09-15"]] },
-  { owner: "Baji", client: "Arif 9", deal: "1 Apr 2026 · 3 items (Baji's share)", total: 1507500, installments: [[4, 301500, "2026-08-15"], [5, 301500, "2026-09-15"]] },
-  { owner: "Baji", client: "Mubin", deal: "20 May 2026 · 2 items", total: 1247000, installments: [[3, 249400, "2026-08-23"], [4, 249400, "2026-09-23"], [5, 249400, "2026-10-23"]] },
-  { owner: "Ch Tahir", client: "Mubin", deal: "20 May 2026 · 4 items", total: 2493000, installments: [[3, 498600, "2026-08-23"], [4, 498600, "2026-09-23"], [5, 498600, "2026-10-23"]] }
-];
-
+let DB = { investors: [], clients: [], deals: [], qists: [], cashbook: [], payouts: [] };
 
 function uid(prefix) {
   return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-// Fetch all tables from Supabase
+// ------------------------------------------------------------
+// Auth — RLS is locked to `authenticated`, so nothing below
+// will return data until a session exists.
+// ------------------------------------------------------------
+async function dbGetSession() {
+  const { data, error } = await dbClient.auth.getSession();
+  if (error) throw error;
+  return data.session;
+}
+
+async function dbSignIn(email, password) {
+  const { data, error } = await dbClient.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  return data.session;
+}
+
+async function dbSignOut() {
+  const { error } = await dbClient.auth.signOut();
+  if (error) throw error;
+}
+
+// ------------------------------------------------------------
+// Load everything
+// ------------------------------------------------------------
 async function loadDataFromSupabase() {
   try {
-
-const [cRes, dRes, iRes, pRes, invRes, tRes] = await Promise.all([
-      dbClient.from("customers").select("*"),
-      dbClient.from("deals").select("*"),
-      dbClient.from("installments").select("*"),
-      dbClient.from("payments").select("*"),
+    const [invRes, clRes, dRes, qRes, cbRes, poRes] = await Promise.all([
       dbClient.from("investors").select("*"),
+      dbClient.from("clients").select("*"),
+      dbClient.from("deals").select("*"),
+      dbClient.from("qists").select("*"),
+      dbClient.from("cashbook_entries").select("*"),
+      dbClient.from("investor_payouts").select("*")
     ]);
 
-    if (cRes.error) throw cRes.error;
-    if (dRes.error) throw dRes.error;
-    if (iRes.error) throw iRes.error;
-    if (pRes.error) throw pRes.error;
-    if (invRes.error) throw invRes.error;
-
-    // If Supabase database is empty on first run, auto-seed with original records
-    if (!cRes.data || cRes.data.length === 0) {
-      await seedInitialData();
-      return await loadDataFromSupabase();
+    for (const r of [invRes, clRes, dRes, qRes, cbRes, poRes]) {
+      if (r.error) throw r.error;
     }
 
-DB = {
-      customers: cRes.data || [],
-      deals: (dRes.data || []).map(d => ({ ...d, customerId: d.customer_id })),
-      installments: (iRes.data || []).map(i => ({ ...i, dealId: i.deal_id })),
-      payments: (pRes.data || []).map(p => ({ ...p, installmentId: p.installment_id })),
-      investors: invRes.data || [],
+    DB = {
+      investors: (invRes.data || []).map(v => ({ ...v, textColor: v.text_color })),
+      clients: clRes.data || [],
+      deals: (dRes.data || []).map(d => ({ ...d, clientId: d.client_id, investorId: d.investor_id, itemDetails: d.item_details })),
+      qists: (qRes.data || []).map(q => ({
+        ...q, dealId: q.deal_id, expectedDate: q.expected_date,
+        receivedAmount: q.received_amount, receivedDate: q.received_date
+      })),
+      cashbook: (cbRes.data || []).map(e => ({ ...e, referenceId: e.reference_id })),
+      payouts: (poRes.data || []).map(p => ({ ...p, investorId: p.investor_id }))
     };
-
-    // Dynamically build the colors for the UI based on the database records
-    OWNER_COLORS = {};
-    DB.investors.forEach(inv => {
-      OWNER_COLORS[inv.name] = { fill: inv.fill_color, bg: inv.bg_color, text: inv.text_color };
-    });
-
-
 
     return DB;
   } catch (err) {
@@ -68,107 +70,154 @@ DB = {
   }
 }
 
-// Auto seed initial ledger data to Supabase
-async function seedInitialData() {
-  const customers = [], deals = [], installments = [];
-  const cMap = {};
-
-  SEED_DATA.forEach((r, ri) => {
-    if (!cMap[r.client]) {
-      const id = "c_" + Object.keys(cMap).length;
-      cMap[r.client] = { id, name: r.client, phone: "", notes: "" };
-      customers.push(cMap[r.client]);
-    }
-    const dealId = "d_" + ri;
-    deals.push({
-      id: dealId,
-      customer_id: cMap[r.client].id,
-      owner: r.owner,
-      title: r.deal,
-      total: r.total,
-      created: r.deal.split(" · ")[0]
-    });
-    r.installments.forEach((v, ii) => {
-      installments.push({
-        id: `${dealId}_${ii}`,
-        deal_id: dealId,
-        qist: v[0],
-        amount: v[1],
-        due: v[2]
-      });
-    });
-  });
-
-  await dbClient.from("customers").upsert(customers);
-  await dbClient.from("deals").upsert(deals);
-  await dbClient.from("installments").upsert(installments);
-}
-
-// Supabase Async Operations
-async function dbUpsertCustomer(customer) {
-  const { error } = await dbClient.from("customers").upsert({
-    id: customer.id,
-    name: customer.name,
-    phone: customer.phone,
-    notes: customer.notes
+// ------------------------------------------------------------
+// Investors
+// ------------------------------------------------------------
+async function dbUpsertInvestor(inv) {
+  const { error } = await dbClient.from("investors").upsert({
+    id: inv.id, name: inv.name, type: inv.type, fill: inv.fill, bg: inv.bg,
+    text_color: inv.textColor, notes: inv.notes
   });
   if (error) throw error;
 }
 
-async function dbDeleteCustomer(id) {
-  const { error } = await dbClient.from("customers").delete().eq("id", id);
+async function dbDeleteInvestor(id) {
+  const { error } = await dbClient.from("investors").delete().eq("id", id);
   if (error) throw error;
 }
 
-async function dbUpsertDeal(deal, installmentRows) {
+// ------------------------------------------------------------
+// Clients
+// ------------------------------------------------------------
+async function dbUpsertClient(c) {
+  const { error } = await dbClient.from("clients").upsert({
+    id: c.id, name: c.name, phone: c.phone, notes: c.notes
+  });
+  if (error) throw error;
+}
+
+async function dbDeleteClient(id) {
+  const { error } = await dbClient.from("clients").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ------------------------------------------------------------
+// Deals — creating a deal also logs the Kharid as a cash-out
+// cashbook entry (the capital left the pool to fund the purchase).
+// ------------------------------------------------------------
+async function dbUpsertDeal(deal, qistRows) {
+  const isNew = !(await dbClient.from("deals").select("id").eq("id", deal.id).maybeSingle()).data;
+
   const { error: dErr } = await dbClient.from("deals").upsert({
-    id: deal.id,
-    customer_id: deal.customerId,
-    owner: deal.owner,
-    title: deal.title,
-    total: deal.total,
-    created: deal.created
+    id: deal.id, client_id: deal.clientId, investor_id: deal.investorId,
+    item_details: deal.itemDetails, kharid: deal.kharid, munafa: deal.munafa
   });
   if (dErr) throw dErr;
 
-  // Clear existing installments for this deal and replace
-  await dbClient.from("installments").delete().eq("deal_id", deal.id);
-  const { error: iErr } = await dbClient.from("installments").insert(
-    installmentRows.map((r, n) => ({
-      id: `${deal.id}_${n}`,
-      deal_id: deal.id,
-      qist: r.qist,
-      amount: r.amount,
-      due: r.due
-    }))
-  );
-  if (iErr) throw iErr;
+  if (qistRows && qistRows.length) {
+    const { error: qErr } = await dbClient.from("qists").insert(
+      qistRows.map((r, n) => ({
+        id: `${deal.id}_q${Date.now().toString(36)}${n}`,
+        deal_id: deal.id, amount: r.amount, expected_date: r.expectedDate,
+        received_amount: 0, status: "pending"
+      }))
+    );
+    if (qErr) throw qErr;
+  }
+
+  if (isNew && deal.kharid > 0) {
+    await dbInsertCashbookEntry({
+      id: uid("cb"), type: "cash_out", amount: deal.kharid, referenceId: deal.id,
+      date: new Date().toISOString().slice(0, 10), notes: `Kharid — ${deal.itemDetails || "deal"}`
+    });
+  }
 }
 
 async function dbDeleteDeal(id) {
+  const qistIds = (await dbClient.from("qists").select("id").eq("deal_id", id)).data?.map(q => q.id) || [];
+  const refs = [id, ...qistIds];
+  await dbClient.from("cashbook_entries").delete().in("reference_id", refs);
   const { error } = await dbClient.from("deals").delete().eq("id", id);
   if (error) throw error;
 }
 
-async function dbUpdateInstallment(id, qist, amount, due) {
-  const { error } = await dbClient.from("installments").update({ qist, amount, due }).eq("id", id);
-  if (error) throw error;
-}
-
-async function dbDeleteInstallment(id) {
-  const { error } = await dbClient.from("installments").delete().eq("id", id);
-  if (error) throw error;
-}
-
-async function dbInsertPayment(payment) {
-  const { error } = await dbClient.from("payments").insert({
-    id: payment.id,
-    installment_id: payment.installmentId,
-    amount: payment.amount,
-    date: payment.date,
-    method: payment.method,
-    note: payment.note
+// ------------------------------------------------------------
+// Qists
+// ------------------------------------------------------------
+async function dbAddQist(dealId, row) {
+  const { error } = await dbClient.from("qists").insert({
+    id: uid("q"), deal_id: dealId, amount: row.amount, expected_date: row.expectedDate,
+    received_amount: 0, status: "pending"
   });
   if (error) throw error;
 }
 
+async function dbUpdateQist(q) {
+  const { error } = await dbClient.from("qists").update({
+    amount: q.amount, expected_date: q.expectedDate
+  }).eq("id", q.id);
+  if (error) throw error;
+}
+
+async function dbDeleteQist(id) {
+  await dbClient.from("cashbook_entries").delete().eq("reference_id", id);
+  const { error } = await dbClient.from("qists").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// Records a payment against a qist: bumps received_amount/received_date/status,
+// and logs a cash_in cashbook entry for the amount actually paid just now.
+async function dbRecordQistPayment(qistId, amount, date, note) {
+  const { data: q, error: gErr } = await dbClient.from("qists").select("*").eq("id", qistId).single();
+  if (gErr) throw gErr;
+
+  const newReceived = Number(q.received_amount || 0) + Number(amount);
+  const status = newReceived <= 0 ? "pending" : newReceived >= Number(q.amount) ? "paid" : "partial";
+
+  const { error: uErr } = await dbClient.from("qists").update({
+    received_amount: newReceived, received_date: date, status
+  }).eq("id", qistId);
+  if (uErr) throw uErr;
+
+  await dbInsertCashbookEntry({
+    id: uid("cb"), type: "cash_in", amount: Number(amount), referenceId: qistId, date, notes: note || ""
+  });
+}
+
+// ------------------------------------------------------------
+// Investor payouts — recording a payout also logs it as a
+// cash-out cashbook entry, since it's real cash leaving the business.
+// ------------------------------------------------------------
+async function dbInsertPayout(payout) {
+  const { error } = await dbClient.from("investor_payouts").insert({
+    id: payout.id, investor_id: payout.investorId, amount: payout.amount, date: payout.date, notes: payout.notes
+  });
+  if (error) throw error;
+
+  await dbInsertCashbookEntry({
+    id: uid("cb"), type: "cash_out", amount: payout.amount, referenceId: payout.id,
+    date: payout.date, notes: payout.notes || "Investor payout"
+  });
+}
+
+async function dbDeletePayout(id) {
+  await dbClient.from("cashbook_entries").delete().eq("reference_id", id);
+  const { error } = await dbClient.from("investor_payouts").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ------------------------------------------------------------
+// Cashbook
+// ------------------------------------------------------------
+async function dbInsertCashbookEntry(entry) {
+  const { error } = await dbClient.from("cashbook_entries").insert({
+    id: entry.id, type: entry.type, amount: entry.amount, reference_id: entry.referenceId,
+    date: entry.date, notes: entry.notes
+  });
+  if (error) throw error;
+}
+
+async function dbDeleteCashbookEntry(id) {
+  const { error } = await dbClient.from("cashbook_entries").delete().eq("id", id);
+  if (error) throw error;
+}
