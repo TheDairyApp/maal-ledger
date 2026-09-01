@@ -106,6 +106,17 @@ async function dbDeleteDeal(id) {
   cacheDB();
 }
 
+// Persists PDF/WhatsApp statement remarks onto a specific deal only when the
+// user explicitly opts in — remarks typed into a statement are otherwise
+// transient (used just for that one message/PDF) and never auto-saved.
+async function dbUpdateDealRemarks(dealId, remarks) {
+  const { error } = await dbClient.from("deals").update({ remarks }).eq("id", dealId);
+  if (error) throw error;
+  const d = DB.deals.find(x => x.id === dealId);
+  if (d) d.remarks = remarks;
+  cacheDB();
+}
+
 async function dbUpdateQist(q) {
   const { error } = await dbClient.from("qists").update({ amount: q.amount, expected_date: q.expectedDate }).eq("id", q.id);
   if (error) throw error;
