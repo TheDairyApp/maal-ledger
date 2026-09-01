@@ -1,4 +1,4 @@
-let STATE = { view: "dashboard", activeClient: null, activeInvestor: null, filter: "all", search: "" };
+let STATE = { view: "dashboard", activeClient: null, activeInvestor: null, filter: "all", search: "", cashFrom: "", cashTo: "", cashClient: "" };
 
 // ---- Helpers ----
 function money(n) { return "Rs " + Math.round(Number(n) || 0).toLocaleString("en-IN"); }
@@ -29,6 +29,95 @@ function investorRealizedProfit(id) { return DB.deals.filter(d => d.investorId =
 function investorOwed(id) { return investorRealizedProfit(id) - investorWithdrawn(id); }
 
 // ============================================================
+// Cash flow — single source of truth. Dashboard, the Cashbook view,
+// and the Cash IN/OUT PDF all read through these same functions so
+// there is never a second, drifting calculation of the same numbers.
+// ============================================================
+function getCashTransactionsByDateRange(fromDate, toDate, clientId) {
+  return DB.cashbook.filter(e => {
+    if (fromDate && e.date < fromDate) return false;
+    if (toDate && e.date > toDate) return false;
+    if (clientId) {
+      const d = e.type === "cash_out" ? deal(e.referenceId) : deal(DB.qists.find(q => q.id === e.referenceId)?.dealId);
+      if (!d || d.clientId !== clientId) return false;
+    }
+    return true;
+  }).sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.id || "").localeCompare(b.id || ""));
+}
+function calculateCashInTotal(entries) { return entries.filter(e => e.type === "cash_in").reduce((s, e) => s + Number(e.amount), 0); }
+function calculateCashOutTotal(entries) { return entries.filter(e => e.type === "cash_out").reduce((s, e) => s + Number(e.amount), 0); }
+function calculateNetCashFlow(entries) { return calculateCashInTotal(entries) - calculateCashOutTotal(entries); }
+function cashEntryLabel(e) {
+  const d = e.type === "cash_out" ? deal(e.referenceId) : deal(DB.qists.find(q => q.id === e.referenceId)?.dealId);
+  return { who: d ? client(d.clientId)?.name || "" : "", what: d ? (d.itemDetails || "") : (e.notes || "") };
+}
+
+// ============================================================
+// Cash IN / Cash OUT PDF (also doubles as the Reports PDF — this
+// app has no separate reporting module, Cashbook already is the
+// report, so both buttons call this against the same filtered data
+// the user is currently looking at).
+// Note: jsPDF's built-in fonts don't render Urdu/Nastaliq script,
+// so this PDF is always generated in English regardless of the
+// UI language toggle — a known limitation, not silently faked.
+// ============================================================
+function generateCashbookPDF() {
+  if (!window.jspdf) return alert("PDF library failed to load — check your internet connection and try again.");
+  const from = STATE.cashFrom || "", to = STATE.cashTo || "", clientId = STATE.cashClient || "";
+  const entries = getCashTransactionsByDateRange(from, to, clientId);
+  if (!entries.length) return alert("No transactions in this range to export.");
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const clientName = clientId ? (client(clientId)?.name || "") : "";
+
+  doc.setFontSize(16); doc.setTextColor(20, 33, 61);
+  doc.text("MAAL LEDGER", 14, 16);
+  doc.setFontSize(11); doc.setTextColor(60);
+  doc.text("Cash IN / Cash OUT Report", 14, 23);
+  doc.setFontSize(9); doc.setTextColor(110);
+  doc.text(`Date From: ${from ? dateFmt(from) : "Beginning"}    Date To: ${to ? dateFmt(to) : "Today"}${clientName ? `    Client: ${clientName}` : ""}`, 14, 29);
+  doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, 14, 34);
+
+  const rows = entries.map(e => {
+    const { who, what } = cashEntryLabel(e);
+    return [
+      dateFmt(e.date),
+      e.type === "cash_in" ? "Cash IN" : "Cash OUT",
+      who,
+      what,
+      e.type === "cash_in" ? money(e.amount) : "",
+      e.type === "cash_out" ? money(e.amount) : "",
+      e.notes || ""
+    ];
+  });
+
+  doc.autoTable({
+    startY: 40,
+    head: [["Date", "Type", "Client", "Description", "Cash IN", "Cash OUT", "Notes"]],
+    body: rows,
+    styles: { fontSize: 8, cellPadding: 3, overflow: "linebreak" },
+    headStyles: { fillColor: [20, 33, 61], textColor: 255 },
+    columnStyles: { 4: { halign: "right" }, 5: { halign: "right" } },
+    margin: { left: 14, right: 14 },
+    didDrawPage: () => {
+      doc.setFontSize(8); doc.setTextColor(150);
+      doc.text(`Page ${doc.internal.getNumberOfPages()}`, doc.internal.pageSize.width - 26, doc.internal.pageSize.height - 10);
+    }
+  });
+
+  const finalY = doc.lastAutoTable.finalY + 10;
+  doc.setFontSize(10); doc.setTextColor(20);
+  doc.text(`Total Cash IN:`, 14, finalY); doc.text(money(calculateCashInTotal(entries)), 60, finalY);
+  doc.text(`Total Cash OUT:`, 14, finalY + 6); doc.text(money(calculateCashOutTotal(entries)), 60, finalY + 6);
+  doc.setFont(undefined, "bold");
+  doc.text(`Net Cash Flow:`, 14, finalY + 13); doc.text(money(calculateNetCashFlow(entries)), 60, finalY + 13);
+  doc.setFont(undefined, "normal");
+
+  doc.save(`maal-ledger-cashbook-${from || "all"}-to-${to || "today"}.pdf`);
+}
+
+// ============================================================
 // WhatsApp reminders
 // ============================================================
 const WA_STRINGS = {
@@ -48,15 +137,58 @@ const WA_STRINGS = {
 // generateWhatsAppLink(clientPhone, amount, dueDate, language)
 // Builds a personalized reminder (looks up the client by phone in DB.clients
 // for the name), opens wa.me with the text pre-filled, and returns the URL.
-function generateWhatsAppLink(clientPhone, amount, dueDate, language = "en") {
+function buildDefaultWhatsAppMessage(clientPhone, amount, dueDate, language = "en") {
   const lang = WA_STRINGS[language] ? language : "en";
   const s = WA_STRINGS[lang];
   const phoneDigits = String(clientPhone || "").replace(/\D/g, "");
   const c = (DB.clients || []).find(x => (x.phone || "").replace(/\D/g, "") === phoneDigits);
-  const msg = `${s.greet(c?.name)} ${s.body(money(amount), dateFmt(dueDate))} ${s.thanks}`;
+  return `${s.greet(c?.name)} ${s.body(money(amount), dateFmt(dueDate))} ${s.thanks}`;
+}
+
+function generateWhatsAppLink(clientPhone, amount, dueDate, language = "en") {
+  const msg = buildDefaultWhatsAppMessage(clientPhone, amount, dueDate, language);
+  const phoneDigits = String(clientPhone || "").replace(/\D/g, "");
   const url = `https://wa.me/${phoneDigits}?text=${encodeURIComponent(msg)}`;
   window.open(url, "_blank");
   return url;
+}
+
+// Customize → Preview → Send flow. Opens with the auto-generated default
+// message already filled in and editable; nothing is sent until the user
+// taps "Send on WhatsApp".
+function openWhatsAppComposer(qistId) {
+  const q = DB.qists.find(x => x.id === qistId);
+  if (!q) return;
+  const d = deal(q.dealId), c = d ? client(d.clientId) : null;
+  if (!c || !c.phone) return alert("This client has no WhatsApp number on file.");
+  const remaining = Math.max(0, Number(q.amount) - Number(q.receivedAmount || 0));
+  const defaultMsg = buildDefaultWhatsAppMessage(c.phone, remaining, q.expectedDate, LANG);
+  openModal(`<h3>Customize WhatsApp message</h3>
+  <p class="small muted">To: ${esc(c.name)} · ${esc(c.phone)}</p>
+  <div class="field full" style="margin-bottom:12px"><label>Message</label><textarea id="waMsg" rows="5" oninput="document.getElementById('waPreview').textContent=this.value">${esc(defaultMsg)}</textarea></div>
+  <div class="field full"><label>Preview</label><div id="waPreview" class="wa-preview">${esc(defaultMsg)}</div></div>
+  <div class="modal-actions" style="justify-content:space-between">
+    <button class="btn small" onclick="resetWhatsAppMessage('${qistId}')">Reset to default</button>
+    <div style="display:flex;gap:8px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="sendCustomWhatsApp('${esc(c.phone)}')">Send on WhatsApp</button></div>
+  </div>`);
+}
+
+function resetWhatsAppMessage(qistId) {
+  const q = DB.qists.find(x => x.id === qistId);
+  const d = deal(q.dealId), c = client(d.clientId);
+  const remaining = Math.max(0, Number(q.amount) - Number(q.receivedAmount || 0));
+  const msg = buildDefaultWhatsAppMessage(c.phone, remaining, q.expectedDate, LANG);
+  document.getElementById("waMsg").value = msg;
+  document.getElementById("waPreview").textContent = msg;
+}
+
+function sendCustomWhatsApp(clientPhone) {
+  const msg = document.getElementById("waMsg").value;
+  if (!msg.trim()) return alert("Message can't be empty.");
+  const phoneDigits = String(clientPhone || "").replace(/\D/g, "");
+  const url = `https://wa.me/${phoneDigits}?text=${encodeURIComponent(msg)}`;
+  window.open(url, "_blank");
+  closeModal();
 }
 
 // Convenience wrapper used by the qist card's WhatsApp button
@@ -77,7 +209,7 @@ function sendWhatsAppReminder(qistId) {
 // ============================================================
 const I18N = {
   en: {
-    nav_dashboard: "Dashboard", nav_clients: "Clients", nav_all: "All Qists", nav_investors: "Investors", nav_cashbook: "Cashbook",
+    nav_dashboard: "Dashboard", nav_clients: "Clients", nav_all: "All Qists", nav_investors: "Investors", nav_cashbook: "Cashbook", nav_settings: "Settings",
     dash_title: "Dashboard", dash_sub: "Live overview of the ledger",
     cash_on_hand: "Cash on hand", outstanding_debt: "Outstanding debt", realized_profit: "Realized profit",
     overdue_qists: "Overdue qists", due_soon: "Due within 7 days",
@@ -87,7 +219,7 @@ const I18N = {
     still_outstanding: "still outstanding."
   },
   ur: {
-    nav_dashboard: "ڈیش بورڈ", nav_clients: "کلائنٹس", nav_all: "تمام اقساط", nav_investors: "سرمایہ کار", nav_cashbook: "کیش بک",
+    nav_dashboard: "ڈیش بورڈ", nav_clients: "کلائنٹس", nav_all: "تمام اقساط", nav_investors: "سرمایہ کار", nav_cashbook: "کیش بک", nav_settings: "ترتیبات",
     dash_title: "ڈیش بورڈ", dash_sub: "لیجر کا لائیو جائزہ",
     cash_on_hand: "دستیاب نقدی", outstanding_debt: "باقی رقم", realized_profit: "حاصل شدہ منافع",
     overdue_qists: "زائد المیعاد اقساط", due_soon: "اگلے 7 دن میں واجب الادا",
@@ -104,7 +236,7 @@ function t(key) { return (I18N[LANG] && I18N[LANG][key]) || I18N.en[key] || key;
 
 function applyNavLanguage() {
   document.querySelectorAll(".nav button").forEach(b => {
-    const key = { dashboard: "nav_dashboard", clients: "nav_clients", all: "nav_all", investors: "nav_investors", cashbook: "nav_cashbook" }[b.dataset.view];
+    const key = { dashboard: "nav_dashboard", clients: "nav_clients", all: "nav_all", investors: "nav_investors", cashbook: "nav_cashbook", settings: "nav_settings" }[b.dataset.view];
     if (key) b.textContent = t(key);
   });
   const lt = document.getElementById("langToggle");
@@ -146,42 +278,85 @@ function toggleTheme() {
 // ============================================================
 // Auth gate — RLS requires a session, so nothing loads without one
 // ============================================================
+let CURRENT_SESSION = null;
+
 async function initAuthGate() {
   loadTheme();
   document.documentElement.setAttribute("lang", LANG);
   document.documentElement.setAttribute("dir", LANG === "ur" ? "rtl" : "ltr");
   let session;
   try { session = await dbGetSession(); } catch (e) { session = null; }
+  CURRENT_SESSION = session;
   if (session) { startApp(); return; }
   renderLoginGate();
 }
 
 function renderLoginGate() {
-  document.body.innerHTML = `<div style="min-height:100vh;display:grid;place-items:center;background:var(--page)">
-    <div class="card" style="padding:28px;width:100%;max-width:360px">
+  document.body.innerHTML = `<div class="login-wrap">
+    <div class="card login-card">
       <h2 style="margin:0 0 4px">Maal Ledger</h2>
       <p class="muted small" style="margin:0 0 20px">Sign in to access the cloud ledger.</p>
-      <div class="field" style="margin-bottom:12px"><label>Email</label><input id="loginEmail" type="email"></div>
-      <div class="field" style="margin-bottom:16px"><label>Password</label><input id="loginPass" type="password"></div>
+      <div class="field" style="margin-bottom:12px"><label>Email</label><input id="loginEmail" type="email" autocomplete="username"></div>
+      <div class="field" style="margin-bottom:8px"><label>Password</label>
+        <div class="pw-wrap"><input id="loginPass" type="password" autocomplete="current-password"><button type="button" class="pw-toggle" onclick="togglePwVisibility()">Show</button></div>
+      </div>
+      <div style="text-align:right;margin-bottom:16px"><a href="javascript:void(0)" class="small" onclick="openForgotPassword()">Forgot password?</a></div>
       <div id="loginErr" class="small" style="color:var(--red);margin-bottom:10px;display:none"></div>
-      <button class="btn primary" style="width:100%" onclick="doLogin()">Sign in</button>
+      <button class="btn primary" id="loginBtn" style="width:100%" onclick="doLogin()">Sign in</button>
     </div>
     <div class="toast" id="toast"></div>
+    <div class="modal-back" id="modalBack"><div class="modal" id="modal"></div></div>
   </div>`;
   document.getElementById("loginPass").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+  document.getElementById("modalBack").addEventListener("click", e => { if (e.target.id === "modalBack") closeModal(); });
+}
+
+function togglePwVisibility() {
+  const inp = document.getElementById("loginPass");
+  const btn = document.querySelector(".pw-toggle");
+  const show = inp.type === "password";
+  inp.type = show ? "text" : "password";
+  btn.textContent = show ? "Hide" : "Show";
 }
 
 async function doLogin() {
   const email = document.getElementById("loginEmail").value.trim();
   const pass = document.getElementById("loginPass").value;
   const errBox = document.getElementById("loginErr");
+  const btn = document.getElementById("loginBtn");
   errBox.style.display = "none";
+  if (!email || !pass) { errBox.textContent = "Enter both email and password."; errBox.style.display = "block"; return; }
+  btn.disabled = true; btn.textContent = "Signing in...";
   try {
     await dbSignIn(email, pass);
     location.reload();
   } catch (err) {
     errBox.textContent = err.message || "Sign in failed.";
     errBox.style.display = "block";
+    btn.disabled = false; btn.textContent = "Sign in";
+  }
+}
+
+function openForgotPassword() {
+  openModal(`<h3>Reset password</h3><p class="small muted">Enter your account email — we'll send a password reset link.</p>
+  <div class="field full"><label>Email</label><input id="frEmail" type="email"></div>
+  <div id="frMsg" class="small" style="margin-top:8px;display:none"></div>
+  <div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="frBtn" onclick="sendResetEmail()">Send reset link</button></div>`);
+}
+
+async function sendResetEmail() {
+  const email = document.getElementById("frEmail").value.trim();
+  const msg = document.getElementById("frMsg"), btn = document.getElementById("frBtn");
+  if (!email) return alert("Enter your email.");
+  btn.disabled = true; btn.textContent = "Sending...";
+  try {
+    const { error } = await dbClient.auth.resetPasswordForEmail(email);
+    if (error) throw error;
+    msg.style.color = "var(--green)"; msg.textContent = "Reset link sent — check your inbox."; msg.style.display = "block";
+  } catch (err) {
+    msg.style.color = "var(--red)"; msg.textContent = err.message || "Failed to send reset email."; msg.style.display = "block";
+  } finally {
+    btn.disabled = false; btn.textContent = "Send reset link";
   }
 }
 
@@ -239,6 +414,7 @@ function render() {
   else if (STATE.view === "all") body = allQistsView();
   else if (STATE.view === "investors") body = investorsView();
   else if (STATE.view === "cashbook") body = cashbookView();
+  else if (STATE.view === "settings") body = settingsView();
   document.getElementById("main").innerHTML = body;
 }
 
@@ -248,8 +424,8 @@ function render() {
 function dashboard() {
   const outstanding = DB.deals.reduce((s, d) => s + dealOutstanding(d.id), 0);
   const realizedProfit = DB.deals.reduce((s, d) => s + dealRealizedProfit(d), 0);
-  const cashIn = DB.cashbook.filter(e => e.type === "cash_in").reduce((s, e) => s + Number(e.amount), 0);
-  const cashOut = DB.cashbook.filter(e => e.type === "cash_out").reduce((s, e) => s + Number(e.amount), 0);
+  const allCash = getCashTransactionsByDateRange("", "");
+  const cashIn = calculateCashInTotal(allCash), cashOut = calculateCashOutTotal(allCash);
   const overdue = DB.qists.filter(q => q.status !== "paid" && daysUntil(q.expectedDate) < 0);
   const soon = DB.qists.filter(q => q.status !== "paid" && daysUntil(q.expectedDate) >= 0 && daysUntil(q.expectedDate) <= 7);
 
@@ -278,7 +454,7 @@ function qbox(q) {
     <div class="qdate">${dateFmt(q.expectedDate)}</div>
     <div class="status">${qistStatusLabel(q)}${q.receivedAmount > 0 && q.status !== "paid" ? ` · ${money(q.receivedAmount)} in` : ""}</div>
     <div class="qactions"><button class="btn small" onclick="openPayment('${q.id}')">${q.status === "paid" ? "View" : "Pay"}</button><button class="btn small" onclick="openQist('${q.id}')">Edit</button></div>
-    ${q.status !== "paid" && c?.phone ? `<button class="btn small" style="width:100%;margin-top:5px" onclick="sendWhatsAppReminder('${q.id}')">WhatsApp</button>` : ""}
+    ${q.status !== "paid" && c?.phone ? `<button class="btn small" style="width:100%;margin-top:5px" onclick="openWhatsAppComposer('${q.id}')">WhatsApp</button>` : ""}
   </div>`;
 }
 
@@ -368,7 +544,7 @@ function investorsView() {
     `<button class="btn" onclick="setView('investors')">← Investors</button>`);
 }
 
-function selectInvestor(id) { STATE.activeInvestor = id; STATE.view = "investors"; render(); }
+function selectInvestor(id) { STATE.activeInvestor = id; STATE.view = "investors"; closeMobileNav(); render(); }
 
 function openInvestor(id) {
   const v = id ? investor(id) : { name: "", type: "profit_share", fill: "#0F766E", bg: "#E4F5F1", textColor: "#0B5A54", notes: "" };
@@ -428,25 +604,119 @@ async function deletePayout(id) {
 // Cashbook
 // ============================================================
 function cashbookView() {
-  const cashIn = DB.cashbook.filter(e => e.type === "cash_in").reduce((s, e) => s + Number(e.amount), 0);
-  const cashOut = DB.cashbook.filter(e => e.type === "cash_out").reduce((s, e) => s + Number(e.amount), 0);
+  const from = STATE.cashFrom, to = STATE.cashTo, clientId = STATE.cashClient;
+  const entries = getCashTransactionsByDateRange(from, to, clientId);
+  const cashIn = calculateCashInTotal(entries), cashOut = calculateCashOutTotal(entries), net = calculateNetCashFlow(entries);
   const outstanding = DB.deals.reduce((s, d) => s + dealOutstanding(d.id), 0);
   const realizedProfit = DB.deals.reduce((s, d) => s + dealRealizedProfit(d), 0);
-  const entries = DB.cashbook.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.id || "").localeCompare(a.id || ""));
+  const display = entries.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.id || "").localeCompare(a.id || ""));
 
-  return layout("Cashbook", "Chronological ledger of every rupee in and out",
-    `<div class="stats">
+  return layout("Cashbook", "Chronological ledger of every rupee in and out — also your Reports export",
+    `<div class="filter-bar">
+      <div class="field"><label>Date From</label><input type="date" value="${from}" onchange="STATE.cashFrom=this.value;render()"></div>
+      <div class="field"><label>Date To</label><input type="date" value="${to}" onchange="STATE.cashTo=this.value;render()"></div>
+      <div class="field"><label>Client</label><select onchange="STATE.cashClient=this.value;render()"><option value="">All clients</option>${DB.clients.map(c => `<option value="${c.id}" ${clientId === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>
+      <button class="btn" onclick="STATE.cashFrom='';STATE.cashTo='';STATE.cashClient='';render()">Clear filters</button>
+      <button class="btn primary" onclick="generateCashbookPDF()">⬇ Download PDF</button>
+    </div>
+    <div class="stats">
       <div class="card stat"><label>Total cash in</label><strong class="green">${money(cashIn)}</strong></div>
       <div class="card stat"><label>Total cash out</label><strong class="red">${money(cashOut)}</strong></div>
-      <div class="card stat"><label>Cash on hand</label><strong class="${cashIn - cashOut >= 0 ? "green" : "red"}">${money(cashIn - cashOut)}</strong></div>
+      <div class="card stat"><label>Net cash flow</label><strong class="${net >= 0 ? "green" : "red"}">${money(net)}</strong></div>
       <div class="card stat"><label>Outstanding debt</label><strong class="amber">${money(outstanding)}</strong></div>
       <div class="card stat"><label>Realized profit</label><strong class="green">${money(realizedProfit)}</strong></div>
     </div>
-    <div class="payment-list">${entries.map(e => {
-      const d = e.type === "cash_out" ? deal(e.referenceId) : (deal(DB.qists.find(q => q.id === e.referenceId)?.dealId));
-      const label = d ? `${esc(client(d.clientId)?.name || "")} · ${esc(d.itemDetails || "")}` : (e.notes || "");
-      return `<div class="payment row"><div><b class="${e.type === "cash_in" ? "green" : "red"}">${e.type === "cash_in" ? "+ " : "− "}${money(e.amount)}</b><div class="small muted">${label}${e.notes && d ? " · " + esc(e.notes) : ""}</div></div><div class="small muted">${dateFmt(e.date)}</div></div>`;
-    }).join("") || '<div class="empty">No cashbook entries yet.</div>'}</div>`, "");
+    <div class="payment-list">${display.map(e => {
+      const { who, what } = cashEntryLabel(e);
+      const label = who ? `${esc(who)} · ${esc(what)}` : esc(what);
+      return `<div class="payment row"><div><b class="${e.type === "cash_in" ? "green" : "red"}">${e.type === "cash_in" ? "+ " : "− "}${money(e.amount)}</b><div class="small muted">${label}${e.notes && who ? " · " + esc(e.notes) : ""}</div></div><div class="small muted">${dateFmt(e.date)}</div></div>`;
+    }).join("") || '<div class="empty">No cashbook entries in this filter.</div>'}</div>`, "");
+}
+
+// ============================================================
+// Settings — Account (change email), Security (change password),
+// Preferences (language/theme), Session (log out)
+// ============================================================
+function settingsView() {
+  const email = CURRENT_SESSION?.user?.email || "";
+  const themeIsDark = document.documentElement.getAttribute("data-theme") === "dark";
+  return layout("Settings", "Account, security, and preferences", `
+    <div class="card settings-card">
+      <h3>Account</h3>
+      <div class="settings-row"><div><b>Email</b><div class="small muted">${esc(email)}</div></div><button class="btn small" onclick="openChangeEmail()">Change email</button></div>
+    </div>
+    <div class="card settings-card">
+      <h3>Security</h3>
+      <div class="settings-row"><div><b>Password</b><div class="small muted">Change your account password</div></div><button class="btn small" onclick="openChangePassword()">Change password</button></div>
+    </div>
+    <div class="card settings-card">
+      <h3>Preferences</h3>
+      <div class="settings-row"><div><b>Language</b><div class="small muted">Interface labels only — your data stays as entered</div></div><button class="btn small" onclick="toggleLanguage()">${LANG === "en" ? "Switch to اردو" : "Switch to English"}</button></div>
+      <div class="settings-row"><div><b>Theme</b><div class="small muted">Dark or light mode</div></div><button class="btn small" onclick="toggleTheme();render()">${themeIsDark ? "Switch to Light" : "Switch to Dark"}</button></div>
+    </div>
+    <div class="card settings-card">
+      <h3>Session</h3>
+      <div class="settings-row"><div><b>Signed in as ${esc(email)}</b></div><button class="btn small danger" onclick="doLogout()">Log out</button></div>
+    </div>`, "");
+}
+
+function openChangePassword() {
+  openModal(`<h3>Change password</h3><div class="form-grid">
+  <div class="field full"><label>New password *</label><input id="npPass" type="password" autocomplete="new-password"></div>
+  <div class="field full"><label>Confirm new password *</label><input id="npPass2" type="password" autocomplete="new-password"></div>
+  </div><p class="small muted">Minimum 6 characters.</p>
+  <div id="npErr" class="small" style="color:var(--red);display:none;margin-bottom:8px"></div>
+  <div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="npBtn" onclick="saveNewPassword()">Change password</button></div>`);
+}
+
+async function saveNewPassword() {
+  const p1 = document.getElementById("npPass").value, p2 = document.getElementById("npPass2").value;
+  const err = document.getElementById("npErr"), btn = document.getElementById("npBtn");
+  err.style.display = "none";
+  if (!p1 || p1.length < 6) { err.textContent = "Password must be at least 6 characters."; err.style.display = "block"; return; }
+  if (p1 !== p2) { err.textContent = "Passwords do not match."; err.style.display = "block"; return; }
+  btn.disabled = true; btn.textContent = "Saving...";
+  try {
+    const { error } = await dbClient.auth.updateUser({ password: p1 });
+    if (error) throw error;
+    closeModal(); toast("Password updated");
+  } catch (e) {
+    err.textContent = e.message || "Failed to update password."; err.style.display = "block";
+  } finally {
+    btn.disabled = false; btn.textContent = "Change password";
+  }
+}
+
+function openChangeEmail() {
+  const current = CURRENT_SESSION?.user?.email || "";
+  openModal(`<h3>Change email</h3><div class="form-grid">
+  <div class="field full"><label>New email *</label><input id="neEmail" type="email" value="${esc(current)}"></div>
+  </div><p class="small muted">You'll get a confirmation link at the new address — the email only changes once you click it, not immediately.</p>
+  <div id="neErr" class="small" style="color:var(--red);display:none;margin-bottom:8px"></div>
+  <div class="modal-actions"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="neBtn" onclick="saveNewEmail()">Send confirmation</button></div>`);
+}
+
+async function saveNewEmail() {
+  const email = document.getElementById("neEmail").value.trim();
+  const err = document.getElementById("neErr"), btn = document.getElementById("neBtn");
+  err.style.display = "none";
+  if (!email || !email.includes("@")) { err.textContent = "Enter a valid email address."; err.style.display = "block"; return; }
+  btn.disabled = true; btn.textContent = "Sending...";
+  try {
+    const { error } = await dbClient.auth.updateUser({ email });
+    if (error) throw error;
+    closeModal(); toast("Confirmation email sent — check your inbox to complete the change.");
+  } catch (e) {
+    err.textContent = e.message || "Failed to update email."; err.style.display = "block";
+  } finally {
+    btn.disabled = false; btn.textContent = "Send confirmation";
+  }
+}
+
+async function doLogout() {
+  if (!confirm("Log out of Maal Ledger?")) return;
+  try { await dbSignOut(); location.reload(); }
+  catch (err) { alert("Logout failed: " + err.message); }
 }
 
 // ============================================================
@@ -596,10 +866,17 @@ async function savePayment() {
 // ============================================================
 // Nav / misc
 // ============================================================
-function setFilter(f) { STATE.filter = f; STATE.view = "all"; render(); }
-function setView(v) { STATE.view = v; STATE.activeClient = null; STATE.activeInvestor = null; render(); }
-function selectClient(id) { STATE.activeClient = id; STATE.view = "clients"; render(); }
-function mobileNav() { const s = document.querySelector(".sidebar"); if (s) s.style.display = "flex"; }
+function setFilter(f) { STATE.filter = f; STATE.view = "all"; closeMobileNav(); render(); }
+function setView(v) { STATE.view = v; STATE.activeClient = null; STATE.activeInvestor = null; closeMobileNav(); render(); }
+function selectClient(id) { STATE.activeClient = id; STATE.view = "clients"; closeMobileNav(); render(); }
+function mobileNav() {
+  document.getElementById("sidebar")?.classList.add("open");
+  document.getElementById("sidebarBackdrop")?.classList.add("show");
+}
+function closeMobileNav() {
+  document.getElementById("sidebar")?.classList.remove("open");
+  document.getElementById("sidebarBackdrop")?.classList.remove("show");
+}
 
 async function syncCloud() {
   toast("Refreshing from Supabase...");
@@ -608,7 +885,7 @@ async function syncCloud() {
   toast("Database up to date");
 }
 
-document.querySelectorAll(".nav button").forEach(b => b.onclick = () => { STATE.view = b.dataset.view; STATE.activeClient = null; STATE.activeInvestor = null; render(); });
+document.querySelectorAll(".nav button").forEach(b => b.onclick = () => { STATE.view = b.dataset.view; STATE.activeClient = null; STATE.activeInvestor = null; closeMobileNav(); render(); });
 const searchBoxEl = document.getElementById("searchBox");
 if (searchBoxEl) searchBoxEl.oninput = e => { STATE.search = e.target.value; renderSidebar(); };
 const modalBackEl = document.getElementById("modalBack");

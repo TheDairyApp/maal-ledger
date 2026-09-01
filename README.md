@@ -1,2 +1,0 @@
-# maal-ledger
-Investment App
