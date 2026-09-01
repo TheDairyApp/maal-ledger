@@ -61,11 +61,11 @@ function cashEntryLabel(e) {
 // so this PDF is always generated in English regardless of the
 // UI language toggle — a known limitation, not silently faked.
 // ============================================================
-function generateCashbookPDF() {
-  if (!window.jspdf) return alert("PDF library failed to load — check your internet connection and try again.");
+function buildCashbookPDF() {
+  if (!window.jspdf) { alert("PDF library failed to load — check your internet connection and try again."); return null; }
   const from = STATE.cashFrom || "", to = STATE.cashTo || "", clientId = STATE.cashClient || "";
   const entries = getCashTransactionsByDateRange(from, to, clientId);
-  if (!entries.length) return alert("No transactions in this range to export.");
+  if (!entries.length) { alert("No transactions in this range to export."); return null; }
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
@@ -114,7 +114,40 @@ function generateCashbookPDF() {
   doc.text(`Net Cash Flow:`, 14, finalY + 13); doc.text(money(calculateNetCashFlow(entries)), 60, finalY + 13);
   doc.setFont(undefined, "normal");
 
-  doc.save(`maal-ledger-cashbook-${from || "all"}-to-${to || "today"}.pdf`);
+  doc._filename = `maal-ledger-cashbook-${from || "all"}-to-${to || "today"}.pdf`;
+  return doc;
+}
+
+function generateCashbookPDF() {
+  const doc = buildCashbookPDF();
+  if (doc) doc.save(doc._filename);
+}
+
+function shareCashbookPDF() {
+  const doc = buildCashbookPDF();
+  if (doc) sharePDFToWhatsApp(doc, doc._filename, "Maal Ledger — Cash IN/OUT report");
+}
+
+// Shares a jsPDF document to WhatsApp (or any other app the person picks)
+// via the native OS share sheet, so the actual file — not just a link —
+// reaches the recipient. There is no way to pre-target a specific WhatsApp
+// contact from a web page for file attachments; the person chooses the
+// recipient inside WhatsApp after tapping it in the share sheet. Falls back
+// to a plain download on desktop browsers / devices that don't support it.
+async function sharePDFToWhatsApp(doc, filename, shareText) {
+  try {
+    const blob = doc.output("blob");
+    const file = new File([blob], filename, { type: "application/pdf" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: filename, text: shareText || "" });
+      return;
+    }
+  } catch (err) {
+    if (err.name === "AbortError") return; // person cancelled the share sheet
+    console.error("Share failed:", err);
+  }
+  doc.save(filename);
+  alert("This device/browser doesn't support direct sharing to WhatsApp — the PDF has been downloaded instead. Attach it manually from WhatsApp.");
 }
 
 // ============================================================
@@ -189,6 +222,161 @@ function sendCustomWhatsApp(clientPhone) {
   const url = `https://wa.me/${phoneDigits}?text=${encodeURIComponent(msg)}`;
   window.open(url, "_blank");
   closeModal();
+}
+
+// ============================================================
+// Deal Statement — a full per-deal statement (item, purchase date,
+// every qist with its date/amount/status, monthly breakdown, and an
+// explicit toggle for whether the profit margin is disclosed to the
+// client). Reachable from both the Client and Investor deal cards.
+// ============================================================
+const STATEMENT_STRINGS = {
+  en: {
+    greet: name => name ? `Dear ${name},` : "Dear Customer,",
+    item: "Item", purchaseDate: "Purchase date", schedule: "Installment schedule:",
+    qistLine: (n, date, amt, status) => `Qist ${n}: ${date} — ${amt} (${status})`,
+    totalLine: "Total amount", outstandingLine: "Outstanding balance",
+    breakdownLine: (kharid, munafa, total) => `Purchase: ${kharid} + Profit: ${munafa} = Total: ${total}`,
+    statusPaid: "Paid", statusPartial: "Partial", statusPending: "Pending",
+    thanks: "Thank you for your business!"
+  },
+  ur: {
+    greet: name => name ? `محترم ${name}،` : "محترم گاہک،",
+    item: "آئٹم", purchaseDate: "خریداری کی تاریخ", schedule: "قسطوں کا شیڈول:",
+    qistLine: (n, date, amt, status) => `قسط ${n}: ${date} — ${amt} (${status})`,
+    totalLine: "کل رقم", outstandingLine: "باقی رقم",
+    breakdownLine: (kharid, munafa, total) => `خرید: ${kharid} + منافع: ${munafa} = کل: ${total}`,
+    statusPaid: "ادا شدہ", statusPartial: "جزوی", statusPending: "باقی",
+    thanks: "آپ کے کاروبار کا شکریہ!"
+  }
+};
+
+function buildDealStatementMessage(dealId, language, showProfit) {
+  const d = deal(dealId), c = client(d.clientId);
+  const lang = STATEMENT_STRINGS[language] ? language : "en";
+  const s = STATEMENT_STRINGS[lang];
+  const qs = dealQists(dealId);
+  const statusLabel = q => q.status === "paid" ? s.statusPaid : q.status === "partial" ? s.statusPartial : s.statusPending;
+
+  const lines = [s.greet(c?.name), ""];
+  if (d.itemDetails) lines.push(`${s.item}: ${d.itemDetails}`);
+  lines.push(`${s.purchaseDate}: ${dateFmt(d.created)}`, "", s.schedule);
+  qs.forEach((q, i) => lines.push(s.qistLine(i + 1, dateFmt(q.expectedDate), money(q.amount), statusLabel(q))));
+  lines.push("");
+  lines.push(showProfit ? s.breakdownLine(money(d.kharid), money(d.munafa), money(d.total)) : `${s.totalLine}: ${money(d.total)}`);
+  lines.push(`${s.outstandingLine}: ${money(dealOutstanding(dealId))}`, "", s.thanks);
+  return lines.join("\n");
+}
+
+let DEAL_STATEMENT = null;
+
+function openDealStatement(dealId) {
+  const d = deal(dealId), c = client(d.clientId);
+  DEAL_STATEMENT = { dealId, lang: LANG, showProfit: false };
+  openModal(`<h3>Deal statement — ${esc(c?.name || "")}</h3>
+  <div class="row" style="margin-bottom:12px;flex-wrap:wrap;gap:14px;align-items:flex-start;justify-content:flex-start">
+    <div><label class="small muted" style="display:block;margin-bottom:4px">Language</label>
+      <div class="filter"><button class="chip" id="dsLangEn" onclick="setDealStatementLang('en')">English</button><button class="chip" id="dsLangUr" onclick="setDealStatementLang('ur')">اردو</button></div>
+    </div>
+    <div><label class="small muted" style="display:block;margin-bottom:4px">Profit visibility</label>
+      <div class="filter"><button class="chip" id="dsProfitHide" onclick="setDealStatementProfit(false)">Hide profit</button><button class="chip" id="dsProfitShow" onclick="setDealStatementProfit(true)">Show profit</button></div>
+    </div>
+  </div>
+  <div class="field full" style="margin-bottom:12px"><label>Message</label><textarea id="dsMsg" rows="10" oninput="document.getElementById('dsPreview').textContent=this.value"></textarea></div>
+  <div class="field full"><label>Preview</label><div id="dsPreview" class="wa-preview"></div></div>
+  <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" onclick="downloadDealStatementPDF()">⬇ PDF</button><button class="btn small" onclick="shareDealStatementPDF()">📤 PDF via WhatsApp</button></div>
+    <div style="display:flex;gap:8px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="sendDealStatementWhatsApp()">Send message on WhatsApp</button></div>
+  </div>`);
+  refreshDealStatementUI();
+}
+
+function setDealStatementLang(lang) { DEAL_STATEMENT.lang = lang; refreshDealStatementUI(); }
+function setDealStatementProfit(show) { DEAL_STATEMENT.showProfit = show; refreshDealStatementUI(); }
+
+function refreshDealStatementUI() {
+  if (!DEAL_STATEMENT) return;
+  const { dealId, lang, showProfit } = DEAL_STATEMENT;
+  document.getElementById("dsLangEn")?.classList.toggle("active", lang === "en");
+  document.getElementById("dsLangUr")?.classList.toggle("active", lang === "ur");
+  document.getElementById("dsProfitHide")?.classList.toggle("active", !showProfit);
+  document.getElementById("dsProfitShow")?.classList.toggle("active", showProfit);
+  const msg = buildDealStatementMessage(dealId, lang, showProfit);
+  const msgEl = document.getElementById("dsMsg"), pvEl = document.getElementById("dsPreview");
+  if (msgEl) msgEl.value = msg;
+  if (pvEl) pvEl.textContent = msg;
+}
+
+function sendDealStatementWhatsApp() {
+  const { dealId } = DEAL_STATEMENT;
+  const d = deal(dealId), c = client(d.clientId);
+  if (!c?.phone) return alert("This client has no WhatsApp number on file.");
+  const msg = document.getElementById("dsMsg").value;
+  if (!msg.trim()) return alert("Message can't be empty.");
+  const phoneDigits = String(c.phone).replace(/\D/g, "");
+  window.open(`https://wa.me/${phoneDigits}?text=${encodeURIComponent(msg)}`, "_blank");
+  closeModal();
+}
+
+// Note: like the Cashbook PDF, this is always rendered in English regardless
+// of the message-language toggle — jsPDF's built-in fonts can't shape Urdu script.
+function buildDealStatementPDF() {
+  if (!window.jspdf) { alert("PDF library failed to load — check your internet connection and try again."); return null; }
+  const { dealId, showProfit } = DEAL_STATEMENT;
+  const d = deal(dealId), c = client(d.clientId);
+  const qs = dealQists(dealId);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+
+  doc.setFontSize(16); doc.setTextColor(20, 33, 61); doc.text("MAAL LEDGER", 14, 16);
+  doc.setFontSize(11); doc.setTextColor(60); doc.text("Deal Statement", 14, 23);
+  doc.setFontSize(9); doc.setTextColor(110);
+  doc.text(`Client: ${c?.name || ""}    Item: ${d.itemDetails || "-"}`, 14, 29);
+  doc.text(`Purchase date: ${dateFmt(d.created)}    Generated: ${new Date().toLocaleString("en-GB")}`, 14, 34);
+
+  const statusText = q => q.status === "paid" ? "Paid" : q.status === "partial" ? "Partial" : "Pending";
+  const rows = qs.map((q, i) => [String(i + 1), dateFmt(q.expectedDate), money(q.amount), money(q.receivedAmount || 0), statusText(q)]);
+
+  doc.autoTable({
+    startY: 40,
+    head: [["#", "Due Date", "Amount", "Received", "Status"]],
+    body: rows,
+    styles: { fontSize: 8, cellPadding: 3 },
+    headStyles: { fillColor: [20, 33, 61], textColor: 255 },
+    margin: { left: 14, right: 14 }
+  });
+
+  let y = doc.lastAutoTable.finalY + 8;
+  doc.setFontSize(10); doc.setTextColor(20);
+  if (showProfit) {
+    doc.text(`Purchase (Kharid): ${money(d.kharid)}`, 14, y); y += 6;
+    doc.text(`Profit (Munafa): ${money(d.munafa)}`, 14, y); y += 6;
+  }
+  doc.setFont(undefined, "bold");
+  doc.text(`Total: ${money(d.total)}`, 14, y); y += 7;
+  doc.setFont(undefined, "normal");
+  doc.text(`Outstanding: ${money(dealOutstanding(dealId))}`, 14, y); y += 12;
+
+  const byMonth = {};
+  qs.forEach(q => { const m = (q.expectedDate || "").slice(0, 7); if (m) byMonth[m] = (byMonth[m] || 0) + Number(q.amount); });
+  const monthRows = Object.keys(byMonth).sort().map(m => [m, money(byMonth[m])]);
+  if (monthRows.length) {
+    doc.setFontSize(10); doc.text("Monthly breakdown", 14, y); y += 4;
+    doc.autoTable({ startY: y, head: [["Month", "Total due"]], body: monthRows, styles: { fontSize: 8, cellPadding: 3 }, headStyles: { fillColor: [20, 33, 61], textColor: 255 }, margin: { left: 14, right: 14 } });
+  }
+
+  doc._filename = `deal-statement-${(c?.name || "client").replace(/\s+/g, "-")}.pdf`;
+  return doc;
+}
+
+function downloadDealStatementPDF() {
+  const doc = buildDealStatementPDF();
+  if (doc) doc.save(doc._filename);
+}
+
+function shareDealStatementPDF() {
+  const doc = buildDealStatementPDF();
+  if (doc) sharePDFToWhatsApp(doc, doc._filename, "Maal Ledger — deal statement");
 }
 
 // Convenience wrapper used by the qist card's WhatsApp button
@@ -379,10 +567,26 @@ async function startApp() {
 // ============================================================
 // Shell / navigation
 // ============================================================
+function nearlyCompleteDeals(limit = 3) {
+  return DB.deals
+    .map(d => ({ d, pct: d.total ? Math.round((dealReceived(d.id) / d.total) * 100) : 0 }))
+    .filter(x => x.pct > 0 && x.pct < 100)
+    .sort((a, b) => b.pct - a.pct)
+    .slice(0, limit);
+}
+
 function renderSidebar() {
   const q = STATE.search.toLowerCase();
   const cs = DB.clients.filter(c => (c.name || "").toLowerCase().includes(q));
   const list = document.getElementById("custList");
+  const nc = document.getElementById("nearlyComplete");
+  if (nc) {
+    const top = nearlyCompleteDeals();
+    nc.innerHTML = `<div class="nc-wrap"><div class="nc-label">Nearly complete</div>${top.map(x => {
+      const c = client(x.d.clientId);
+      return `<div class="nc-item" onclick="selectClient('${x.d.clientId}')"><div class="row"><span>${esc(c?.name || "")}</span><span style="font-weight:800">${x.pct}%</span></div><div class="mini"><i style="width:${x.pct}%"></i></div></div>`;
+    }).join("") || '<div class="nc-empty">No active deals yet.</div>'}</div>`;
+  }
   if (!list) return;
   list.innerHTML = cs.map(c => {
     const ds = DB.deals.filter(d => d.clientId === c.id);
@@ -428,9 +632,17 @@ function dashboard() {
   const cashIn = calculateCashInTotal(allCash), cashOut = calculateCashOutTotal(allCash);
   const overdue = DB.qists.filter(q => q.status !== "paid" && daysUntil(q.expectedDate) < 0);
   const soon = DB.qists.filter(q => q.status !== "paid" && daysUntil(q.expectedDate) >= 0 && daysUntil(q.expectedDate) <= 7);
+  const totalClients = DB.clients.length;
+  const totalDeals = DB.deals.length;
+  const ongoingDeals = DB.deals.filter(d => dealOutstanding(d.id) > 0).length;
 
   return layout(t("dash_title"), t("dash_sub"),
     `<div class="stats">
+      <div class="card stat"><label>Total clients</label><strong>${totalClients}</strong></div>
+      <div class="card stat"><label>Total deals</label><strong>${totalDeals}</strong></div>
+      <div class="card stat"><label>Ongoing investments</label><strong class="amber">${ongoingDeals}</strong></div>
+    </div>
+    <div class="stats">
       <div class="card stat"><label>${t("cash_on_hand")}</label><strong class="${cashIn - cashOut >= 0 ? "green" : "red"}">${money(cashIn - cashOut)}</strong></div>
       <div class="card stat"><label>${t("outstanding_debt")}</label><strong class="amber">${money(outstanding)}</strong></div>
       <div class="card stat"><label>${t("realized_profit")}</label><strong class="green">${money(realizedProfit)}</strong></div>
@@ -478,7 +690,7 @@ function clientsView() {
   const total = ds.reduce((s, d) => s + Number(d.total || 0), 0), out = ds.reduce((s, d) => s + dealOutstanding(d.id), 0), got = total - out;
   return layout("Client", "All deals and qists for this client",
     `<div class="card header-card"><div class="row"><div><h2>${esc(c.name)}</h2><div class="small muted">${c.phone || "No phone"}</div></div><div class="actions"><button class="btn" onclick="openClient('${c.id}')">Edit client</button><button class="btn primary" onclick="openDeal('${c.id}')">+ Add deal</button></div></div><div class="metrics"><div class="metric"><label>Total tracked</label><strong>${money(total)}</strong></div><div class="metric"><label>Received</label><strong class="green">${money(got)}</strong></div><div class="metric"><label>Outstanding</label><strong class="amber">${money(out)}</strong></div></div><div class="progress"><i style="width:${total ? Math.round(got / total * 100) : 0}%"></i></div></div>
-    ${ds.map(d => { const v = investor(d.investorId); return `<div class="card truck"><div class="truck-head"><div><div class="truck-title">${esc(d.itemDetails || "Deal")}</div><div class="truck-sub">Investor: ${v ? esc(v.name) : "—"} · Kharid ${money(d.kharid)} + Munafa ${money(d.munafa)} = ${money(d.total)}</div></div><div class="actions"><button class="btn small" onclick="openDeal('${c.id}','${d.id}')">Edit deal</button><button class="btn small danger" onclick="deleteDeal('${d.id}')">Delete</button></div></div><div class="route">${dealQists(d.id).map(qbox).join("")}</div></div>`; }).join("") || '<div class="empty">No deals for this client.</div>'}`,
+    ${ds.map(d => { const v = investor(d.investorId); return `<div class="card truck"><div class="truck-head"><div><div class="truck-title">${esc(d.itemDetails || "Deal")}</div><div class="truck-sub">Investor: ${v ? esc(v.name) : "—"} · Kharid ${money(d.kharid)} + Munafa ${money(d.munafa)} = ${money(d.total)}</div></div><div class="actions"><button class="btn small" onclick="openDealStatement('${d.id}')">Statement</button><button class="btn small" onclick="openDeal('${c.id}','${d.id}')">Edit deal</button><button class="btn small danger" onclick="deleteDeal('${d.id}')">Delete</button></div></div><div class="route">${dealQists(d.id).map(qbox).join("")}</div></div>`; }).join("") || '<div class="empty">No deals for this client.</div>'}`,
     `<button class="btn" onclick="setView('clients')">← Clients</button>`);
 }
 
@@ -540,7 +752,17 @@ function investorsView() {
     </div></div>
     ${v.type === "zero_benefit" ? `<div class="empty">This investor is zero-benefit — no profit share or payouts apply, funds are tracked for the record only.</div>` : `
     <div class="section"><div class="section-head"><h3>Payout history</h3></div><div class="payment-list">${payouts.map(p => `<div class="payment row"><div><b class="red">− ${money(p.amount)}</b>${p.notes ? `<div class="small muted">${esc(p.notes)}</div>` : ""}</div><div class="row" style="gap:10px"><span class="small muted">${dateFmt(p.date)}</span><button class="btn small danger" onclick="deletePayout('${p.id}')">Delete</button></div></div>`).join("") || '<div class="empty">No payouts recorded yet.</div>'}</div></div>`}
-    <div class="section"><div class="section-head"><h3>Deals funded</h3></div><div class="grid">${ds.map(d => { const c = client(d.clientId); return `<div class="card"><div class="row" style="padding:14px 14px 0"><div><b>${esc(c?.name || "")}</b><div class="small muted">${esc(d.itemDetails || "")}</div></div></div><div class="row" style="padding:0 14px 14px"><span class="small muted">Munafa realized</span><b class="green">${money(dealRealizedProfit(d))}</b></div></div>`; }).join("") || '<div class="empty">No deals yet.</div>'}</div></div>`,
+    <div class="section"><div class="section-head"><h3>Deals funded</h3></div>${ds.map(d => {
+      const c = client(d.clientId), received = dealReceived(d.id), pct = d.total ? Math.round(received / d.total * 100) : 0;
+      return `<div class="card truck">
+        <div class="truck-head">
+          <div><div class="truck-title">${esc(c?.name || "")} — ${esc(d.itemDetails || "Deal")}</div><div class="truck-sub">Purchased ${dateFmt(d.created)} · Kharid ${money(d.kharid)} + Munafa ${money(d.munafa)} = ${money(d.total)}</div></div>
+          <div class="actions"><button class="btn small" onclick="openDealStatement('${d.id}')">Statement</button><button class="btn small" onclick="openDeal('${c?.id}','${d.id}')">Edit</button></div>
+        </div>
+        <div class="row" style="margin-top:12px"><span class="small muted">${pct}% received · ${money(dealOutstanding(d.id))} outstanding</span><b class="green">${money(dealRealizedProfit(d))} profit realized</b></div>
+        <div class="progress"><i style="width:${pct}%"></i></div>
+      </div>`;
+    }).join("") || '<div class="empty">No deals yet.</div>'}</div>`,
     `<button class="btn" onclick="setView('investors')">← Investors</button>`);
 }
 
@@ -617,6 +839,7 @@ function cashbookView() {
       <div class="field"><label>Date To</label><input type="date" value="${to}" onchange="STATE.cashTo=this.value;render()"></div>
       <div class="field"><label>Client</label><select onchange="STATE.cashClient=this.value;render()"><option value="">All clients</option>${DB.clients.map(c => `<option value="${c.id}" ${clientId === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>
       <button class="btn" onclick="STATE.cashFrom='';STATE.cashTo='';STATE.cashClient='';render()">Clear filters</button>
+      <button class="btn" onclick="shareCashbookPDF()">📤 Send PDF via WhatsApp</button>
       <button class="btn primary" onclick="generateCashbookPDF()">⬇ Download PDF</button>
     </div>
     <div class="stats">
