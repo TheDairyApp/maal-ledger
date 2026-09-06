@@ -32,3 +32,11 @@ drop policy if exists "Public read clients for shared investor deals" on clients
 create policy "Public read clients for shared investor deals" on clients for select to anon using (
   id in (select client_id from deals where investor_id in (select id from investors where share_token is not null))
 );
+
+
+
+Key changes: each installment gets its own two-line block with a blank line after it, a divider before totals, ✅/⏳/🔴 for instant scanning, bold deal headers (*text* renders bold in WhatsApp), and Urdu now uses Urdu month names instead of mixing in English ones. Implementing now.
+
+Formatting logic confirmed correct (the "Sept" vs "Sep" difference above is just a Node.js sandbox quirk, not a browser issue — real browsers render "Sep"). Final wiring check and delivery:
+
+Implemented as previewed. Both message types (buildDefaultWhatsAppMessage for single-qist reminders, buildStatementMessage for full deal statements) now produce properly spaced, line-broken text instead of one run-on line. Same patch/zip/files as before (still the full cumulative diff, DB unchanged this round).

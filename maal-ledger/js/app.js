@@ -239,17 +239,33 @@ async function sharePDFToWhatsApp(doc, filename, shareText) {
 // ============================================================
 // WhatsApp reminders
 // ============================================================
+const URDU_MONTHS = ["جنوری", "فروری", "مارچ", "اپریل", "مئی", "جون", "جولائی", "اگست", "ستمبر", "اکتوبر", "نومبر", "دسمبر"];
+// Urdu messages use Urdu month names instead of mixing in English "Sep"/"Oct" —
+// mixed-script dates were part of what made messages look jumbled on mobile.
+function dateFmtLang(d, lang) {
+  if (!d) return "—";
+  if (lang !== "ur") return dateFmt(d);
+  const dt = new Date(d + "T00:00:00");
+  return `${dt.getDate()} ${URDU_MONTHS[dt.getMonth()]} ${dt.getFullYear()}`;
+}
+function moneyLang(n, lang) {
+  const num = Math.round(Number(n) || 0).toLocaleString("en-IN");
+  return lang === "ur" ? `روپے ${num}` : `Rs ${num}`;
+}
+function qistStatusEmoji(q) { return q.status === "paid" ? "✅" : daysUntil(q.expectedDate) < 0 ? "🔴" : "⏳"; }
+
 const WA_STRINGS = {
   en: {
     greet: name => name ? `Hi ${name},` : "Hi,",
-    body: (amt, date) => `your installment of ${amt} is due on ${date}. Kindly confirm once paid.`,
+    line1: (amt, date) => `Your installment of ${amt} is due on ${date}.`,
+    line2: "Kindly confirm once paid.",
     thanks: "Thank you!"
   },
   ur: {
-    // Best-effort Urdu phrasing — have a native speaker sanity-check the wording before relying on it for client-facing messages.
     greet: name => name ? `السلام علیکم ${name}،` : "السلام علیکم،",
-    body: (amt, date) => `آپ کی قسط ${amt} کی ادائیگی کی تاریخ ${date} ہے۔ برائے مہربانی ادائیگی کے بعد تصدیق کریں۔`,
-    thanks: "شکریہ۔"
+    line1: (amt, date) => `آپ کی قسط ${amt} کی ادائیگی کی تاریخ ${date} ہے۔`,
+    line2: "براہ کرم ادائیگی کے بعد تصدیق کریں۔",
+    thanks: "شکریہ!"
   }
 };
 
@@ -261,7 +277,7 @@ function buildDefaultWhatsAppMessage(clientPhone, amount, dueDate, language = "e
   const s = WA_STRINGS[lang];
   const phoneDigits = String(clientPhone || "").replace(/\D/g, "");
   const c = (DB.clients || []).find(x => (x.phone || "").replace(/\D/g, "") === phoneDigits);
-  return `${s.greet(c?.name)} ${s.body(money(amount), dateFmt(dueDate))} ${s.thanks}`;
+  return [s.greet(c?.name), "", s.line1(moneyLang(amount, lang), dateFmtLang(dueDate, lang)), s.line2, "", s.thanks].join("\n");
 }
 
 function generateWhatsAppLink(clientPhone, amount, dueDate, language = "en") {
@@ -320,23 +336,25 @@ function sendCustomWhatsApp(clientPhone) {
 const STMT_STRINGS = {
   en: {
     greet: name => name ? `Dear ${name},` : "Dear Customer,",
-    dealHeader: (n, item) => `Deal ${n} — ${item}`,
-    purchaseDate: "Purchase Date",
-    qistLine: (n, due, paid, amt, status) => `  Installment ${n}: Due ${due} | Paid: ${paid} | ${amt} (${status})`,
-    totalLine: "Total", outstandingLine: "Outstanding",
-    breakdownLine: (kharid, munafa, total) => `Purchase: ${kharid} + Profit: ${munafa} = Total: ${total}`,
-    remarksLabel: "Remarks", thanks: "Thank you for your business!",
-    notPaid: "Not Paid"
+    dealHeader: (n, item) => `📄 *Deal ${n} — ${item}*`,
+    purchaseDate: date => `Purchased: ${date}`,
+    qistBlock: (n, due, amt, paid, emoji, status) => `${n}) Due ${due} — ${amt}\n   Paid: ${paid} ${emoji} ${status}`,
+    divider: "—————————————",
+    totalLine: v => `Total: ${v}`, outstandingLine: v => `Outstanding: ${v}`,
+    breakdownLine: (kharid, munafa, total) => `Purchase: ${kharid}\nProfit: ${munafa}\nTotal: ${total}`,
+    remarksLabel: r => `📝 Remarks: ${r}`, thanks: "Thank you for your business! 🙏",
+    notPaid: "Not Paid", statusPaid: "Paid", statusOverdue: "Overdue", statusPending: "Pending"
   },
   ur: {
     greet: name => name ? `محترم ${name}،` : "محترم گاہک،",
-    dealHeader: (n, item) => `ڈیل ${n} — ${item}`,
-    purchaseDate: "خریداری کی تاریخ",
-    qistLine: (n, due, paid, amt, status) => `  قسط ${n}: تاریخ ${due} | ادائیگی: ${paid} | ${amt} (${status})`,
-    totalLine: "کل", outstandingLine: "باقی",
-    breakdownLine: (kharid, munafa, total) => `خرید: ${kharid} + منافع: ${munafa} = کل: ${total}`,
-    remarksLabel: "تبصرہ", thanks: "آپ کے کاروبار کا شکریہ!",
-    notPaid: "ادا نہیں ہوئی"
+    dealHeader: (n, item) => `📄 *ڈیل ${n} — ${item}*`,
+    purchaseDate: date => `تاریخ خریداری: ${date}`,
+    qistBlock: (n, due, amt, paid, emoji, status) => `${n}) تاریخ: ${due} — ${amt}\n   ادائیگی: ${paid} ${emoji} ${status}`,
+    divider: "—————————————",
+    totalLine: v => `کل رقم: ${v}`, outstandingLine: v => `باقی رقم: ${v}`,
+    breakdownLine: (kharid, munafa, total) => `خرید: ${kharid}\nمنافع: ${munafa}\nکل: ${total}`,
+    remarksLabel: r => `📝 تبصرہ: ${r}`, thanks: "آپ کے کاروبار کا شکریہ! 🙏",
+    notPaid: "ادا نہیں ہوئی", statusPaid: "ادا شدہ", statusOverdue: "زائد المیعاد", statusPending: "باقی"
   }
 };
 
@@ -356,15 +374,20 @@ function buildStatementMessage(dealIds, language, showProfit, remarks) {
   const lines = [s.greet(c?.name), ""];
   deals.forEach((d, di) => {
     lines.push(s.dealHeader(di + 1, d.itemDetails || "Deal"));
-    lines.push(`${s.purchaseDate}: ${dateFmt(d.created)}`);
+    lines.push(s.purchaseDate(dateFmtLang(d.created, lang)));
+    lines.push("");
     dealQists(d.id).forEach((q, i) => {
-      const paidDate = Number(q.receivedAmount || 0) > 0 ? dateFmt(q.receivedDate) : s.notPaid;
-      lines.push(s.qistLine(i + 1, dateFmt(q.expectedDate), paidDate, money(q.amount), qistStatusForReport(q)));
+      const paidDate = Number(q.receivedAmount || 0) > 0 ? dateFmtLang(q.receivedDate, lang) : s.notPaid;
+      const statusText = q.status === "paid" ? s.statusPaid : daysUntil(q.expectedDate) < 0 ? s.statusOverdue : s.statusPending;
+      lines.push(s.qistBlock(i + 1, dateFmtLang(q.expectedDate, lang), moneyLang(q.amount, lang), paidDate, qistStatusEmoji(q), statusText));
+      lines.push("");
     });
-    lines.push(showProfit ? s.breakdownLine(money(d.kharid), money(d.munafa), money(d.total)) : `${s.totalLine}: ${money(d.total)}`);
-    lines.push(`${s.outstandingLine}: ${money(dealOutstanding(d.id))}`, "");
+    lines.push(s.divider);
+    lines.push(showProfit ? s.breakdownLine(moneyLang(d.kharid, lang), moneyLang(d.munafa, lang), moneyLang(d.total, lang)) : s.totalLine(moneyLang(d.total, lang)));
+    lines.push(s.outstandingLine(moneyLang(dealOutstanding(d.id), lang)));
+    lines.push("");
   });
-  if (remarks && remarks.trim()) lines.push(`${s.remarksLabel}: ${remarks.trim()}`, "");
+  if (remarks && remarks.trim()) { lines.push(s.remarksLabel(remarks.trim())); lines.push(""); }
   lines.push(s.thanks);
   return lines.join("\n");
 }
