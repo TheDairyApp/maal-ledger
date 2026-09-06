@@ -3,6 +3,40 @@ let DB = { investors: [], clients: [], deals: [], qists: [], cashbook: [], payou
 function uid(prefix) { return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function cacheDB() { localStorage.setItem("maal_cache", JSON.stringify(DB)); }
 
+// ---- Offline write queue (payments only, for now — highest-value field use case) ----
+function loadQueue() { try { return JSON.parse(localStorage.getItem("maal_queue") || "[]"); } catch (e) { return []; } }
+function saveQueue(q) { localStorage.setItem("maal_queue", JSON.stringify(q)); }
+function queuePending(op) { const q = loadQueue(); q.push(op); saveQueue(q); }
+async function flushQueue() {
+  const q = loadQueue();
+  if (!q.length || !navigator.onLine) return;
+  const remaining = [];
+  for (const op of q) {
+    try { if (op.type === "payment") await dbRecordQistPayment(op.qistId, op.amount, op.date, op.note, true); }
+    catch (e) { remaining.push(op); }
+  }
+  saveQueue(remaining);
+  if (remaining.length < q.length && typeof toast === "function") {
+    toast(remaining.length ? `${q.length - remaining.length} synced, ${remaining.length} still pending` : "All offline changes synced");
+    await loadDataFromSupabase(); if (typeof render === "function") render();
+  }
+}
+if (typeof window !== "undefined") window.addEventListener("online", flushQueue);
+
+// ---- Best-effort audit log (never blocks the calling action if it fails) ----
+async function dbLogAudit(entity, entityId, action, details) {
+  try {
+    const email = (typeof CURRENT_SESSION !== "undefined" && CURRENT_SESSION?.user?.email) || "unknown";
+    await dbClient.from("audit_log").insert({ id: uid("al"), entity, entity_id: entityId, action, details: String(details || ""), actor_email: email });
+  } catch (e) { /* audit log is best-effort only */ }
+}
+
+async function dbFetchAuditLog(limit) {
+  const { data, error } = await dbClient.from("audit_log").select("*").order("at", { ascending: false }).limit(limit || 50);
+  if (error) throw error;
+  return data || [];
+}
+
 // ---- Auth ----
 async function dbGetSession() {
   const { data, error } = await dbClient.auth.getSession();
@@ -51,6 +85,7 @@ async function dbUpsertInvestor(inv) {
   const idx = DB.investors.findIndex(x => x.id === inv.id);
   if (idx > -1) DB.investors[idx] = inv; else DB.investors.push(inv);
   cacheDB();
+  dbLogAudit("investor", inv.id, idx > -1 ? "update" : "create", inv.name);
 }
 async function dbDeleteInvestor(id) {
   const { error } = await dbClient.from("investors").delete().eq("id", id);
@@ -64,11 +99,26 @@ async function dbUpsertClient(c) {
   const idx = DB.clients.findIndex(x => x.id === c.id);
   if (idx > -1) DB.clients[idx] = c; else DB.clients.push(c);
   cacheDB();
+  dbLogAudit("client", c.id, idx > -1 ? "update" : "create", c.name);
 }
 async function dbDeleteClient(id) {
   const { error } = await dbClient.from("clients").delete().eq("id", id);
   if (error) throw error;
   DB.clients = DB.clients.filter(x => x.id !== id); cacheDB();
+}
+// Soft delete — preferred over dbDeleteClient for the UI now; kept dbDeleteClient
+// intact for permanent removal from the Trash view.
+async function dbSoftDeleteClient(id) {
+  const { error } = await dbClient.from("clients").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+  if (error) throw error;
+  const c = DB.clients.find(x => x.id === id); if (c) c.deleted_at = new Date().toISOString();
+  cacheDB(); dbLogAudit("client", id, "soft_delete", "");
+}
+async function dbRestoreClient(id) {
+  const { error } = await dbClient.from("clients").update({ deleted_at: null }).eq("id", id);
+  if (error) throw error;
+  const c = DB.clients.find(x => x.id === id); if (c) c.deleted_at = null;
+  cacheDB(); dbLogAudit("client", id, "restore", "");
 }
 
 async function dbUpsertDeal(deal, qistRows) {
@@ -93,6 +143,7 @@ async function dbUpsertDeal(deal, qistRows) {
     DB.cashbook.push(cb);
   }
   cacheDB();
+  dbLogAudit("deal", deal.id, isNew ? "create" : "update", deal.itemDetails || "");
 }
 async function dbDeleteDeal(id) {
   const qistIds = DB.qists.filter(q => q.dealId === id).map(q => q.id);
@@ -104,6 +155,20 @@ async function dbDeleteDeal(id) {
   DB.qists = DB.qists.filter(x => x.dealId !== id);
   DB.cashbook = DB.cashbook.filter(x => !refs.includes(x.referenceId));
   cacheDB();
+}
+// Soft delete — preferred over dbDeleteDeal for the UI now; dbDeleteDeal kept
+// intact for permanent removal from the Trash view.
+async function dbSoftDeleteDeal(id) {
+  const { error } = await dbClient.from("deals").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+  if (error) throw error;
+  const d = DB.deals.find(x => x.id === id); if (d) d.deleted_at = new Date().toISOString();
+  cacheDB(); dbLogAudit("deal", id, "soft_delete", "");
+}
+async function dbRestoreDeal(id) {
+  const { error } = await dbClient.from("deals").update({ deleted_at: null }).eq("id", id);
+  if (error) throw error;
+  const d = DB.deals.find(x => x.id === id); if (d) d.deleted_at = null;
+  cacheDB(); dbLogAudit("deal", id, "restore", "");
 }
 
 // Persists PDF/WhatsApp statement remarks onto a specific deal only when the
@@ -133,18 +198,23 @@ async function dbDeleteQist(id) {
   cacheDB();
 }
 
-async function dbRecordQistPayment(qistId, amount, date, note) {
+async function dbRecordQistPayment(qistId, amount, date, note, _fromQueue) {
   const q = DB.qists.find(x => x.id === qistId);
   const newReceived = Number(q.receivedAmount || 0) + Number(amount);
   const status = newReceived <= 0 ? "pending" : newReceived >= Number(q.amount) ? "paid" : "partial";
-
-  const { error: uErr } = await dbClient.from("qists").update({ received_amount: newReceived, received_date: date, status }).eq("id", qistId);
-  if (uErr) throw uErr;
   q.receivedAmount = newReceived; q.receivedDate = date; q.status = status;
-  
   const cb = { id: uid("cb"), type: "cash_in", amount: Number(amount), referenceId: qistId, date, notes: note || "" };
-  await dbClient.from("cashbook_entries").insert({ id: cb.id, type: cb.type, amount: cb.amount, reference_id: cb.referenceId, date: cb.date, notes: cb.notes });
   DB.cashbook.push(cb); cacheDB();
+
+  try {
+    const { error: uErr } = await dbClient.from("qists").update({ received_amount: newReceived, received_date: date, status }).eq("id", qistId);
+    if (uErr) throw uErr;
+    await dbClient.from("cashbook_entries").insert({ id: cb.id, type: cb.type, amount: cb.amount, reference_id: cb.referenceId, date: cb.date, notes: cb.notes });
+    dbLogAudit("qist", qistId, "payment", `+${amount} on ${date}`);
+  } catch (err) {
+    if (!_fromQueue) { queuePending({ type: "payment", qistId, amount, date, note }); if (typeof toast === "function") toast("Offline — payment saved locally, will sync automatically"); }
+    else throw err;
+  }
 }
 
 async function dbInsertPayout(po) {
@@ -155,6 +225,7 @@ async function dbInsertPayout(po) {
   const cb = { id: uid("cb"), type: "cash_out", amount: po.amount, referenceId: po.id, date: po.date, notes: po.notes || "Investor payout" };
   await dbClient.from("cashbook_entries").insert({ id: cb.id, type: cb.type, amount: cb.amount, reference_id: cb.referenceId, date: cb.date, notes: cb.notes });
   DB.cashbook.push(cb); cacheDB();
+  dbLogAudit("investor", po.investorId, "payout", `${po.amount} on ${po.date}`);
 }
 async function dbDeletePayout(id) {
   await dbClient.from("cashbook_entries").delete().eq("reference_id", id);
@@ -163,4 +234,36 @@ async function dbDeletePayout(id) {
   DB.payouts = DB.payouts.filter(x => x.id !== id);
   DB.cashbook = DB.cashbook.filter(x => x.referenceId !== id);
   cacheDB();
+}
+
+// ---- Investor read-only share links (no login) ----
+async function dbGenerateShareToken(investorId) {
+  const token = uid("tok").replace(/[^a-z0-9]/gi, "");
+  const { error } = await dbClient.from("investors").update({ share_token: token }).eq("id", investorId);
+  if (error) throw error;
+  const v = DB.investors.find(x => x.id === investorId); if (v) v.share_token = token;
+  cacheDB();
+  return token;
+}
+async function dbRevokeShareToken(investorId) {
+  const { error } = await dbClient.from("investors").update({ share_token: null }).eq("id", investorId);
+  if (error) throw error;
+  const v = DB.investors.find(x => x.id === investorId); if (v) v.share_token = null;
+  cacheDB();
+}
+// Uses the public "share_token" RLS policies — works without any session.
+async function dbFetchSharedInvestor(token) {
+  const { data: inv } = await dbClient.from("investors").select("*").eq("share_token", token).maybeSingle();
+  if (!inv) return null;
+  const { data: deals } = await dbClient.from("deals").select("*").eq("investor_id", inv.id);
+  const dealIds = (deals || []).map(d => d.id);
+  const { data: qists } = dealIds.length ? await dbClient.from("qists").select("*").in("deal_id", dealIds) : { data: [] };
+  const clientIds = [...new Set((deals || []).map(d => d.client_id))];
+  const { data: clients } = clientIds.length ? await dbClient.from("clients").select("*").in("id", clientIds) : { data: [] };
+  return {
+    investor: { ...inv, textColor: inv.text_color },
+    deals: (deals || []).map(d => ({ ...d, clientId: d.client_id, investorId: d.investor_id, itemDetails: d.item_details })),
+    qists: (qists || []).map(q => ({ ...q, dealId: q.deal_id, expectedDate: q.expected_date, receivedAmount: q.received_amount, receivedDate: q.received_date })),
+    clients: clients || []
+  };
 }

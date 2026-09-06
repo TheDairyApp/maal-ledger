@@ -1,4 +1,4 @@
-let STATE = { view: "dashboard", activeClient: null, activeInvestor: null, filter: "all", search: "", cashFrom: "", cashTo: "", cashClient: "", stmtClient: "", stmtDeal: "", stmtLang: "", stmtShowProfit: false, stmtRemarks: "" };
+let STATE = { view: "dashboard", activeClient: null, activeInvestor: null, filter: "all", search: "", cashFrom: "", cashTo: "", cashClient: "", stmtClient: "", stmtDeal: "", stmtLang: "", stmtShowProfit: false, stmtRemarks: "", qistView: "list", calDay: null };
 
 // ---- Helpers ----
 function money(n) { return "Rs " + Math.round(Number(n) || 0).toLocaleString("en-IN"); }
@@ -8,8 +8,93 @@ function esc(s) { return String(s ?? "").replace(/[&<>"']/g, m => ({ "&": "&amp;
 function toast(s) { const t = document.getElementById("toast"); if (!t) return; t.textContent = s; t.classList.add("show"); clearTimeout(window._toast); window._toast = setTimeout(() => t.classList.remove("show"), 2200); }
 
 function investor(id) { return DB.investors.find(x => x.id === id); }
+function activeClients() { return DB.clients.filter(c => !c.deleted_at); }
+function activeDeals() { return DB.deals.filter(d => !d.deleted_at); }
+function trashedClients() { return DB.clients.filter(c => c.deleted_at); }
+function trashedDeals() { return DB.deals.filter(d => d.deleted_at); }
+function visibleQists() { return DB.qists.filter(q => { const d = deal(q.dealId); return d && !d.deleted_at; }); }
+
+// At Risk: 2+ consecutive missed (overdue, unpaid) installments in a row.
+function dealIsAtRisk(d) {
+  let streak = 0;
+  for (const q of dealQists(d.id)) {
+    if (q.status !== "paid" && daysUntil(q.expectedDate) < 0) { streak++; if (streak >= 2) return true; }
+    else streak = 0;
+  }
+  return false;
+}
+
+function monthRange() {
+  const now = new Date();
+  return [new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10),
+          new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10)];
+}
+
+function sparklineSVG(values, color) {
+  const w = 100, h = 28, max = Math.max(1, ...values);
+  const step = values.length > 1 ? w / (values.length - 1) : 0;
+  const pts = values.map((v, i) => `${i * step},${h - (v / max) * (h - 4) - 2}`).join(" ");
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;margin-top:4px"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2"/></svg>`;
+}
+function last7DaysCashIn() {
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const iso = d.toISOString().slice(0, 10);
+    days.push(calculateCashInTotal(getCashTransactionsByDateRange(iso, iso)));
+  }
+  return days;
+}
+
+// Bulk WhatsApp reminders (Dashboard/All-Qists overdue selection)
+let BULK_MODE = false;
+let BULK_SELECT = new Set();
+function toggleBulkMode() { BULK_MODE = !BULK_MODE; BULK_SELECT.clear(); render(); }
+function toggleBulkSelect(id, checked) { checked ? BULK_SELECT.add(id) : BULK_SELECT.delete(id); updateBulkBar(); }
+function updateBulkBar() {
+  const bar = document.getElementById("bulkBar"); if (!bar) return;
+  bar.style.display = BULK_SELECT.size ? "flex" : "none";
+  const c = document.getElementById("bulkCount"); if (c) c.textContent = BULK_SELECT.size;
+}
+// Note: opens one WhatsApp chat per selected qist in sequence — browsers may
+// block pop-ups after the first; allow pop-ups for this site if so.
+// Browsers block window.open() calls that aren't a direct result of a user
+// click — a forEach loop opening several tabs only lets the first through.
+// So instead of looping, list each recipient with its own Send button:
+// every tap is its own genuine click, so none of them get blocked.
+function sendBulkWhatsAppReminders() {
+  const ids = [...BULK_SELECT];
+  if (!ids.length) return;
+  openModal(`<h3>Send WhatsApp reminders</h3>
+  <p class="small muted">Tap "Send" on each row — browsers block automatic multi-popup sending, so these need one tap each.</p>
+  <div class="payment-list" id="bulkSendList">${ids.map(id => {
+    const q = DB.qists.find(x => x.id === id), d = q ? deal(q.dealId) : null, c = d ? client(d.clientId) : null;
+    const remaining = q ? Math.max(0, Number(q.amount) - Number(q.receivedAmount || 0)) : 0;
+    return `<div class="payment row" id="bulkRow_${id}"><div><b>${esc(c?.name || "")}</b><div class="small muted">${money(remaining)} due ${dateFmt(q?.expectedDate)}</div></div><button class="btn small primary" onclick="sendOneBulkReminder('${id}')">Send</button></div>`;
+  }).join("")}</div>
+  <div class="modal-actions"><button class="btn primary" onclick="closeBulkSendModal()">Done</button></div>`);
+}
+function sendOneBulkReminder(qistId) {
+  const q = DB.qists.find(x => x.id === qistId); if (!q) return;
+  const d = deal(q.dealId), c = d ? client(d.clientId) : null;
+  if (!c?.phone) return alert("This client has no WhatsApp number on file.");
+  generateWhatsAppLink(c.phone, Math.max(0, Number(q.amount) - Number(q.receivedAmount || 0)), q.expectedDate, LANG);
+  const row = document.getElementById(`bulkRow_${qistId}`);
+  if (row) row.innerHTML = `<div><b>${esc(c.name)}</b><div class="small green">Sent ✓</div></div>`;
+  BULK_SELECT.delete(qistId);
+}
+function closeBulkSendModal() { closeModal(); BULK_MODE = false; BULK_SELECT.clear(); render(); }
 function client(id) { return DB.clients.find(x => x.id === id); }
 function deal(id) { return DB.deals.find(x => x.id === id); }
+
+// Draws the company logo (Settings → Preferences upload) top-right on a PDF
+// page, if one has been set. Silently skipped if none saved or the image
+// format jsPDF can't embed — never blocks PDF generation.
+function addLogoIfAny(doc) {
+  const logo = localStorage.getItem("maal_logo");
+  if (!logo) return;
+  try { doc.addImage(logo, logo.includes("image/png") ? "PNG" : "JPEG", 160, 8, 36, 18); } catch (e) { /* skip logo on failure */ }
+}
 function dealQists(dealId) { return DB.qists.filter(q => q.dealId === dealId).sort((a, b) => (a.expectedDate || "").localeCompare(b.expectedDate || "")); }
 function dealReceived(dealId) { return dealQists(dealId).reduce((s, q) => s + Number(q.receivedAmount || 0), 0); }
 function dealOutstanding(dealId) { const d = deal(dealId); return Math.max(0, Number(d.total || 0) - dealReceived(dealId)); }
@@ -25,7 +110,7 @@ function dealRealizedProfit(d) {
 
 function investorPayouts(id) { return DB.payouts.filter(p => p.investorId === id).sort((a, b) => (b.date || "").localeCompare(a.date || "")); }
 function investorWithdrawn(id) { return investorPayouts(id).reduce((s, p) => s + Number(p.amount || 0), 0); }
-function investorRealizedProfit(id) { return DB.deals.filter(d => d.investorId === id).reduce((s, d) => s + dealRealizedProfit(d), 0); }
+function investorRealizedProfit(id) { return activeDeals().filter(d => d.investorId === id).reduce((s, d) => s + dealRealizedProfit(d), 0); }
 function investorOwed(id) { return investorRealizedProfit(id) - investorWithdrawn(id); }
 
 // ============================================================
@@ -70,6 +155,7 @@ function buildCashbookPDF() {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
   const clientName = clientId ? (client(clientId)?.name || "") : "";
+  addLogoIfAny(doc);
 
   doc.setFontSize(16); doc.setTextColor(20, 33, 61);
   doc.text("MAAL LEDGER", 14, 16);
@@ -293,6 +379,7 @@ function buildStatementPDF(dealIds, showProfit, remarks) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
   const pageH = doc.internal.pageSize.height;
+  addLogoIfAny(doc);
 
   doc.setFontSize(16); doc.setTextColor(20, 33, 61); doc.text("MAAL LEDGER", 14, 16);
   doc.setFontSize(11); doc.setTextColor(60); doc.text("Deal Statement", 14, 23);
@@ -373,8 +460,9 @@ async function saveDealRemarks(dealId) {
 // Navigates to the Statements view with a specific client/deal preselected —
 // used by "Statement" buttons on deal cards, and by clicking a qist card.
 function goToDealStatement(clientId, dealId) {
+  const prefs = getClientStmtPrefs(clientId);
   STATE.stmtClient = clientId; STATE.stmtDeal = dealId; STATE.stmtRemarks = deal(dealId)?.remarks || "";
-  STATE.stmtShowProfit = false;
+  STATE.stmtLang = prefs.lang || ""; STATE.stmtShowProfit = !!prefs.showProfit;
   STATE.view = "statements"; STATE.activeClient = null; STATE.activeInvestor = null;
   closeMobileNav(); render();
 }
@@ -405,7 +493,7 @@ function sendWhatsAppReminder(qistId) {
 // ============================================================
 const I18N = {
   en: {
-    nav_dashboard: "Dashboard", nav_clients: "Clients", nav_all: "All Qists", nav_investors: "Investors", nav_cashbook: "Cashbook", nav_statements: "Statements", nav_settings: "Settings",
+    nav_dashboard: "Dashboard", nav_clients: "Clients", nav_all: "All Qists", nav_investors: "Investors", nav_cashbook: "Cashbook", nav_statements: "Statements", nav_settings: "Settings", tab_home: "Home", tab_more: "More",
     dash_title: "Dashboard", dash_sub: "Live overview of the ledger",
     cash_on_hand: "Cash on hand", outstanding_debt: "Outstanding debt", realized_profit: "Realized profit",
     overdue_qists: "Overdue qists", due_soon: "Due within 7 days",
@@ -415,7 +503,7 @@ const I18N = {
     still_outstanding: "still outstanding."
   },
   ur: {
-    nav_dashboard: "ڈیش بورڈ", nav_clients: "کلائنٹس", nav_all: "تمام اقساط", nav_investors: "سرمایہ کار", nav_cashbook: "کیش بک", nav_statements: "بیانات", nav_settings: "ترتیبات",
+    nav_dashboard: "ڈیش بورڈ", nav_clients: "کلائنٹس", nav_all: "تمام اقساط", nav_investors: "سرمایہ کار", nav_cashbook: "کیش بک", nav_statements: "بیانات", nav_settings: "ترتیبات", tab_home: "ہوم", tab_more: "مزید",
     dash_title: "ڈیش بورڈ", dash_sub: "لیجر کا لائیو جائزہ",
     cash_on_hand: "دستیاب نقدی", outstanding_debt: "باقی رقم", realized_profit: "حاصل شدہ منافع",
     overdue_qists: "زائد المیعاد اقساط", due_soon: "اگلے 7 دن میں واجب الادا",
@@ -435,6 +523,12 @@ function applyNavLanguage() {
     const key = { dashboard: "nav_dashboard", clients: "nav_clients", all: "nav_all", investors: "nav_investors", cashbook: "nav_cashbook", statements: "nav_statements", settings: "nav_settings" }[b.dataset.view];
     if (key) b.textContent = t(key);
   });
+  document.querySelectorAll("#bottomTabs button[data-view] span").forEach(span => {
+    const key = { dashboard: "tab_home", clients: "nav_clients", statements: "nav_statements", cashbook: "nav_cashbook" }[span.parentElement.dataset.view];
+    if (key) span.textContent = t(key);
+  });
+  const moreSpan = document.querySelector('#bottomTabs button:not([data-view]) span');
+  if (moreSpan) moreSpan.textContent = t("tab_more");
   const lt = document.getElementById("langToggle");
   if (lt) lt.textContent = LANG === "en" ? "اردو" : "English";
 }
@@ -480,11 +574,37 @@ async function initAuthGate() {
   loadTheme();
   document.documentElement.setAttribute("lang", LANG);
   document.documentElement.setAttribute("dir", LANG === "ur" ? "rtl" : "ltr");
+  const shareToken = new URLSearchParams(location.search).get("share");
+  if (shareToken) { await renderSharedInvestorView(shareToken); return; }
   let session;
   try { session = await dbGetSession(); } catch (e) { session = null; }
   CURRENT_SESSION = session;
   if (session) { startApp(); return; }
   renderLoginGate();
+}
+
+// Public, no-login view for investor share links — read-only, scoped to that
+// investor's own deals only, via the share_token RLS policies.
+async function renderSharedInvestorView(token) {
+  document.body.innerHTML = `<div class="loading-spinner">Loading statement...</div><div id="toast" class="toast"></div>`;
+  const data = await dbFetchSharedInvestor(token);
+  if (!data) { document.body.innerHTML = `<div class="loading-spinner">This share link is invalid or has been revoked.</div>`; return; }
+  const { investor: inv, deals, qists, clients } = data;
+  const clientName = id => clients.find(c => c.id === id)?.name || "";
+  const totalOut = deals.reduce((s, d) => {
+    const rec = qists.filter(q => q.dealId === d.id).reduce((a, q) => a + Number(q.receivedAmount || 0), 0);
+    return s + Math.max(0, Number(d.total || 0) - rec);
+  }, 0);
+  document.body.innerHTML = `<div style="max-width:720px;margin:0 auto;padding:28px 16px">
+    <h2 style="margin:0 0 4px">${esc(inv.name)} — Investment Overview</h2>
+    <p class="small muted" style="margin:0 0 20px">Read-only shared view · ${deals.length} deal(s) · ${money(totalOut)} outstanding</p>
+    ${deals.map(d => {
+      const qs = qists.filter(q => q.dealId === d.id);
+      const rec = qs.reduce((s, q) => s + Number(q.receivedAmount || 0), 0);
+      const pct = d.total ? Math.round(rec / d.total * 100) : 0;
+      return `<div class="card" style="padding:16px;margin-bottom:12px"><b>${esc(clientName(d.clientId))}</b> — ${esc(d.itemDetails || "Deal")}<div class="small muted">Purchased ${dateFmt(d.created)}</div><div class="progress" style="margin-top:8px"><i style="width:${pct}%"></i></div><div class="small muted" style="margin-top:6px">${pct}% received · ${qs.length} installments</div></div>`;
+    }).join("") || '<div class="empty">No deals yet.</div>'}
+  </div>`;
 }
 
 function renderLoginGate() {
@@ -585,7 +705,7 @@ function nearlyCompleteDeals(limit = 3) {
 
 function renderSidebar() {
   const q = STATE.search.toLowerCase();
-  const cs = DB.clients.filter(c => (c.name || "").toLowerCase().includes(q));
+  const cs = activeClients().filter(c => (c.name || "").toLowerCase().includes(q));
   const list = document.getElementById("custList");
   const nc = document.getElementById("nearlyComplete");
   if (nc) {
@@ -597,7 +717,7 @@ function renderSidebar() {
   }
   if (!list) return;
   list.innerHTML = cs.map(c => {
-    const ds = DB.deals.filter(d => d.clientId === c.id);
+    const ds = activeDeals().filter(d => d.clientId === c.id);
     const total = ds.reduce((s, d) => s + Number(d.total || 0), 0);
     const out = ds.reduce((s, d) => s + dealOutstanding(d.id), 0);
     const pct = total ? Math.round((total - out) / total * 100) : 0;
@@ -612,9 +732,13 @@ function renderSidebar() {
 function layout(title, sub, body, actions = "") {
   return `<div class="topbar"><div class="title"><h2>${title}</h2><p>${sub}</p></div><div class="actions"><button class="btn mobile-menu" onclick="mobileNav()">☰ Menu</button>${actions}</div></div>${body}`;
 }
+function breadcrumb(parts) {
+  return `<div class="breadcrumb">${parts.map((p, i) => `${i > 0 ? '<span class="sep">›</span>' : ''}${p.onclick ? `<a href="javascript:void(0)" onclick="${p.onclick}">${esc(p.label)}</a>` : `<span>${esc(p.label)}</span>`}`).join("")}</div>`;
+}
 
 function navActive() {
   document.querySelectorAll(".nav button").forEach(b => b.classList.toggle("active", b.dataset.view === STATE.view));
+  document.querySelectorAll("#bottomTabs button[data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === STATE.view));
 }
 
 function render() {
@@ -635,41 +759,51 @@ function render() {
 // Dashboard
 // ============================================================
 function dashboard() {
-  const outstanding = DB.deals.reduce((s, d) => s + dealOutstanding(d.id), 0);
-  const realizedProfit = DB.deals.reduce((s, d) => s + dealRealizedProfit(d), 0);
+  const outstanding = activeDeals().reduce((s, d) => s + dealOutstanding(d.id), 0);
+  const realizedProfit = activeDeals().reduce((s, d) => s + dealRealizedProfit(d), 0);
   const allCash = getCashTransactionsByDateRange("", "");
   const cashIn = calculateCashInTotal(allCash), cashOut = calculateCashOutTotal(allCash);
-  const overdue = DB.qists.filter(q => q.status !== "paid" && daysUntil(q.expectedDate) < 0);
-  const soon = DB.qists.filter(q => q.status !== "paid" && daysUntil(q.expectedDate) >= 0 && daysUntil(q.expectedDate) <= 7);
-  const totalClients = DB.clients.length;
-  const totalDeals = DB.deals.length;
-  const ongoingDeals = DB.deals.filter(d => dealOutstanding(d.id) > 0).length;
+  const overdue = visibleQists().filter(q => q.status !== "paid" && daysUntil(q.expectedDate) < 0);
+  const soon = visibleQists().filter(q => q.status !== "paid" && daysUntil(q.expectedDate) >= 0 && daysUntil(q.expectedDate) <= 7);
+  const overdueAmount = overdue.reduce((s, q) => s + Number(q.amount) - Number(q.receivedAmount || 0), 0);
+  const [mStart, mEnd] = monthRange();
+  const collections = calculateCashInTotal(getCashTransactionsByDateRange(mStart, mEnd));
+  const totalClients = activeClients().length;
+  const totalDeals = activeDeals().length;
+  const ongoingDeals = activeDeals().filter(d => dealOutstanding(d.id) > 0).length;
+  const atRisk = activeDeals().filter(dealIsAtRisk);
+  const spark = last7DaysCashIn();
 
   return layout(t("dash_title"), t("dash_sub"),
-    `<div class="stats">
+    `<div class="stats headline-stats">
+      <div class="card stat"><label>${t("cash_on_hand")}</label><strong class="${cashIn - cashOut >= 0 ? "green" : "red"}">${money(cashIn - cashOut)}</strong>${sparklineSVG(spark, "#0F766E")}</div>
+      <div class="card stat"><label>Overdue Amount</label><strong class="red">${money(overdueAmount)}</strong><span class="small muted">${overdue.length} qists</span></div>
+      <div class="card stat"><label>Collections This Month</label><strong class="green">${money(collections)}</strong>${sparklineSVG(spark, "#15803D")}</div>
+    </div>
+    <div class="section" style="margin-top:4px"><div class="section-head"><h3 class="red">⚠ ${t("overdue")}</h3><div style="display:flex;gap:8px"><button class="btn small" onclick="toggleBulkMode()">${BULK_MODE ? "Cancel" : "Select"}</button><button class="btn small" onclick="setFilter('overdue')">${t("view_all")}</button></div></div>
+      <div id="bulkBar" style="display:${BULK_SELECT.size ? "flex" : "none"};gap:10px;align-items:center;margin-bottom:10px"><span class="small"><span id="bulkCount">${BULK_SELECT.size}</span> selected</span><button class="btn small primary" onclick="sendBulkWhatsAppReminders()">Send WhatsApp to selected</button></div>
+      <div class="qgrid">${overdue.slice(0, 8).map(q => qbox(q, BULK_MODE)).join("") || `<div class="empty">${t("no_overdue")}</div>`}</div>
+    </div>
+    ${atRisk.length ? `<div class="alert"><b>${atRisk.length} deal(s) At Risk</b> — 2+ consecutive missed installments: ${atRisk.map(d => esc(client(d.clientId)?.name || "")).join(", ")}</div>` : ""}
+    <div class="section"><div class="section-head"><h3>${t("due_soon_section")}</h3><button class="btn small" onclick="setFilter('soon')">${t("view_all")}</button></div><div class="qgrid">${soon.slice(0, 8).map(q => qbox(q)).join("") || `<div class="empty">${t("no_due_soon")}</div>`}</div></div>
+    <div class="section"><div class="section-head"><h3>Overview</h3></div><div class="stats">
       <div class="card stat"><label>Total clients</label><strong>${totalClients}</strong></div>
       <div class="card stat"><label>Total deals</label><strong>${totalDeals}</strong></div>
       <div class="card stat"><label>Ongoing investments</label><strong class="amber">${ongoingDeals}</strong></div>
-    </div>
-    <div class="stats">
-      <div class="card stat"><label>${t("cash_on_hand")}</label><strong class="${cashIn - cashOut >= 0 ? "green" : "red"}">${money(cashIn - cashOut)}</strong></div>
       <div class="card stat"><label>${t("outstanding_debt")}</label><strong class="amber">${money(outstanding)}</strong></div>
       <div class="card stat"><label>${t("realized_profit")}</label><strong class="green">${money(realizedProfit)}</strong></div>
-      <div class="card stat"><label>${t("overdue_qists")}</label><strong class="red">${overdue.length}</strong></div>
-      <div class="card stat"><label>${t("due_soon")}</label><strong>${soon.length}</strong></div>
-    </div>
-    ${overdue.length ? `<div class="alert"><b>${overdue.length} ${t("overdue_qists").toLowerCase()}</b> · ${money(overdue.reduce((s, q) => s + Number(q.amount) - Number(q.receivedAmount || 0), 0))} ${t("still_outstanding")}</div>` : ""}
-    <div class="section"><div class="section-head"><h3>${t("overdue")}</h3><button class="btn small" onclick="setFilter('overdue')">${t("view_all")}</button></div><div class="qgrid">${overdue.slice(0, 8).map(qbox).join("") || `<div class="empty">${t("no_overdue")}</div>`}</div></div>
-    <div class="section"><div class="section-head"><h3>${t("due_soon_section")}</h3><button class="btn small" onclick="setFilter('soon')">${t("view_all")}</button></div><div class="qgrid">${soon.slice(0, 8).map(qbox).join("") || `<div class="empty">${t("no_due_soon")}</div>`}</div></div>`,
+    </div></div>`,
     `<button class="btn primary" onclick="openClient()">${t("add_client")}</button><button class="btn" onclick="openDeal()">${t("add_deal")}</button><button class="btn" onclick="syncCloud()">${t("refresh")}</button>`);
 }
 
-function qbox(q) {
+function qbox(q, showCheckbox) {
   const d = deal(q.dealId), c = d ? client(d.clientId) : null;
   const remaining = Number(q.amount) - Number(q.receivedAmount || 0);
   const cls = q.status === "paid" ? "paid" : daysUntil(q.expectedDate) < 0 ? "overdue" : daysUntil(q.expectedDate) <= 7 ? "soon" : "";
   const idx = d ? dealQists(d.id).findIndex(x => x.id === q.id) + 1 : 0;
-  return `<div class="qbox ${cls}">
+  const checkbox = showCheckbox && q.status !== "paid" ? `<input type="checkbox" onclick="event.stopPropagation();toggleBulkSelect('${q.id}',this.checked)" style="position:absolute;top:8px;left:8px;width:18px;height:18px;z-index:2">` : "";
+  return `<div class="qbox ${cls}" style="position:relative">
+    ${checkbox}
     ${q.status === "paid" ? '<div class="stamp">PAID</div>' : ''}
     <div class="qnum" style="cursor:pointer" onclick="goToQistDeal('${q.id}')" title="Open this deal">${c ? esc(c.name) : ""}${d?.itemDetails ? " · " + esc(d.itemDetails) : ""}${idx ? " · #" + idx : ""}</div>
     <div class="qamt">${money(q.amount)}</div>
@@ -687,7 +821,7 @@ function clientsView() {
   if (!STATE.activeClient) {
     return layout("Clients", `${DB.clients.length} clients in your ledger`,
       `<div class="grid">${DB.clients.map(c => {
-        const ds = DB.deals.filter(d => d.clientId === c.id);
+        const ds = activeDeals().filter(d => d.clientId === c.id);
         const total = ds.reduce((s, d) => s + Number(d.total || 0), 0);
         const out = ds.reduce((s, d) => s + dealOutstanding(d.id), 0);
         const pct = total ? Math.round((total - out) / total * 100) : 0;
@@ -696,11 +830,12 @@ function clientsView() {
       `<button class="btn primary" onclick="openClient()">+ Add client</button>`);
   }
 
-  const c = client(STATE.activeClient), ds = DB.deals.filter(d => d.clientId === c.id);
+  const c = client(STATE.activeClient), ds = activeDeals().filter(d => d.clientId === c.id);
   const total = ds.reduce((s, d) => s + Number(d.total || 0), 0), out = ds.reduce((s, d) => s + dealOutstanding(d.id), 0), got = total - out;
   return layout("Client", "All deals and qists for this client",
+    breadcrumb([{ label: "Clients", onclick: "setView('clients')" }, { label: c.name }]) +
     `<div class="card header-card"><div class="row"><div><h2>${esc(c.name)}</h2><div class="small muted">${c.phone || "No phone"}</div></div><div class="actions"><button class="btn" onclick="openClient('${c.id}')">Edit client</button><button class="btn primary" onclick="openDeal('${c.id}')">+ Add deal</button></div></div><div class="metrics"><div class="metric"><label>Total tracked</label><strong>${money(total)}</strong></div><div class="metric"><label>Received</label><strong class="green">${money(got)}</strong></div><div class="metric"><label>Outstanding</label><strong class="amber">${money(out)}</strong></div></div><div class="progress"><i style="width:${total ? Math.round(got / total * 100) : 0}%"></i></div></div>
-    ${ds.map(d => { const v = investor(d.investorId); return `<div class="card truck"><div class="truck-head"><div><div class="truck-title">${esc(d.itemDetails || "Deal")}</div><div class="truck-sub">Investor: ${v ? esc(v.name) : "—"} · Kharid ${money(d.kharid)} + Munafa ${money(d.munafa)} = ${money(d.total)}</div></div><div class="actions"><button class="btn small" onclick="goToDealStatement('${c.id}','${d.id}')">Statement</button><button class="btn small" onclick="openDeal('${c.id}','${d.id}')">Edit deal</button><button class="btn small danger" onclick="deleteDeal('${d.id}')">Delete</button></div></div><div class="route">${dealQists(d.id).map(qbox).join("")}</div></div>`; }).join("") || '<div class="empty">No deals for this client.</div>'}`,
+    ${ds.map(d => { const v = investor(d.investorId); return `<div class="card truck"><div class="truck-head"><div><div class="truck-title">${esc(d.itemDetails || "Deal")}${dealIsAtRisk(d) ? ' <span class="tag" style="background:var(--red-bg);color:var(--red);font-weight:800">AT RISK</span>' : ''}</div><div class="truck-sub">Investor: ${v ? esc(v.name) : "—"} · Kharid ${money(d.kharid)} + Munafa ${money(d.munafa)} = ${money(d.total)}</div></div><div class="actions"><button class="btn small" onclick="goToDealStatement('${c.id}','${d.id}')">Statement</button><button class="btn small" onclick="openDeal('${c.id}','${d.id}')">Edit deal</button><button class="btn small danger" onclick="deleteDeal('${d.id}')">Delete</button></div></div><div class="route">${dealQists(d.id).map(qbox).join("")}</div></div>`; }).join("") || '<div class="empty">No deals for this client.</div>'}`,
     `<button class="btn" onclick="setView('clients')">← Clients</button>`);
 }
 
@@ -708,7 +843,7 @@ function clientsView() {
 // All Qists
 // ============================================================
 function allQistsView() {
-  let xs = DB.qists.slice();
+  let xs = visibleQists();
   const filterFn = q => {
     if (STATE.filter === "all") return true;
     if (STATE.filter === "overdue") return q.status !== "paid" && daysUntil(q.expectedDate) < 0;
@@ -718,14 +853,43 @@ function allQistsView() {
   xs = xs.filter(filterFn).sort((a, b) => (a.expectedDate || "").localeCompare(b.expectedDate || ""));
   const counts = {
     all: DB.qists.length,
-    overdue: DB.qists.filter(q => q.status !== "paid" && daysUntil(q.expectedDate) < 0).length,
-    soon: DB.qists.filter(q => q.status !== "paid" && daysUntil(q.expectedDate) >= 0 && daysUntil(q.expectedDate) <= 7).length,
-    paid: DB.qists.filter(q => q.status === "paid").length,
-    partial: DB.qists.filter(q => q.status === "partial").length
+    overdue: visibleQists().filter(q => q.status !== "paid" && daysUntil(q.expectedDate) < 0).length,
+    soon: visibleQists().filter(q => q.status !== "paid" && daysUntil(q.expectedDate) >= 0 && daysUntil(q.expectedDate) <= 7).length,
+    paid: visibleQists().filter(q => q.status === "paid").length,
+    partial: visibleQists().filter(q => q.status === "partial").length
   };
+  const viewMode = STATE.qistView || "list";
+  const allowBulk = BULK_MODE && STATE.filter === "overdue";
   return layout("All Qists", "Every installment across every deal",
-    `<div class="filter">${Object.entries({ all: "All", overdue: "Overdue", soon: "Due soon", partial: "Partial", paid: "Paid" }).map(([k, v]) => `<button class="chip ${STATE.filter === k ? "active" : ""}" onclick="setFilter('${k}')">${v} (${counts[k] || 0})</button>`).join("")}</div><div class="qgrid">${xs.map(qbox).join("") || '<div class="empty">No qists in this filter.</div>'}</div>`, "");
+    `<div class="filter">${Object.entries({ all: "All", overdue: "Overdue", soon: "Due soon", partial: "Partial", paid: "Paid" }).map(([k, v]) => `<button class="chip ${STATE.filter === k ? "active" : ""}" onclick="setFilter('${k}')">${v} (${counts[k] || 0})</button>`).join("")}</div>
+    <div class="filter" style="margin-top:-4px"><button class="chip ${viewMode === "list" ? "active" : ""}" onclick="STATE.qistView='list';render()">List</button><button class="chip ${viewMode === "calendar" ? "active" : ""}" onclick="STATE.qistView='calendar';render()">Calendar</button>${STATE.filter === "overdue" ? `<button class="chip" style="margin-left:auto" onclick="toggleBulkMode()">${BULK_MODE ? "Cancel select" : "Select for WhatsApp"}</button>` : ""}</div>
+    ${allowBulk ? `<div id="bulkBar" style="display:${BULK_SELECT.size ? "flex" : "none"};gap:10px;align-items:center;margin-bottom:10px"><span class="small"><span id="bulkCount">${BULK_SELECT.size}</span> selected</span><button class="btn small primary" onclick="sendBulkWhatsAppReminders()">Send WhatsApp to selected</button></div>` : ""}
+    ${viewMode === "calendar" ? calendarGrid(xs) : `<div class="qgrid">${xs.map(q => qbox(q, allowBulk)).join("") || '<div class="empty">No qists in this filter.</div>'}</div>`}`, "");
 }
+
+// Month-grid calendar of installment due dates for the currently filtered qists.
+let CAL_MONTH = new Date().toISOString().slice(0, 7);
+function calendarGrid(xs) {
+  const [y, m] = CAL_MONTH.split("-").map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const startDow = new Date(y, m - 1, 1).getDay();
+  const byDay = {};
+  xs.forEach(q => { if ((q.expectedDate || "").startsWith(CAL_MONTH)) { const d = Number(q.expectedDate.slice(8, 10)); (byDay[d] = byDay[d] || []).push(q); } });
+  let cells = "";
+  for (let i = 0; i < startDow; i++) cells += `<div class="cal-cell empty"></div>`;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const qs = byDay[d] || [];
+    const overdue = qs.some(q => q.status !== "paid" && daysUntil(q.expectedDate) < 0);
+    const iso = `${CAL_MONTH}-${String(d).padStart(2, "0")}`;
+    cells += `<div class="cal-cell ${overdue ? "overdue" : qs.length ? "has" : ""}" ${qs.length ? `onclick="showCalDay('${iso}')"` : ""}><b>${d}</b>${qs.length ? `<div class="small">${qs.length}</div>` : ""}</div>`;
+  }
+  const dayQs = STATE.calDay ? (byDay[Number(STATE.calDay.slice(8, 10))] || []) : [];
+  return `<div class="cal-head"><button class="btn small" onclick="calShiftMonth(-1)">‹</button><b>${CAL_MONTH}</b><button class="btn small" onclick="calShiftMonth(1)">›</button></div>
+  <div class="cal-grid">${["S", "M", "T", "W", "T", "F", "S"].map(d => `<div class="cal-dow">${d}</div>`).join("")}${cells}</div>
+  ${STATE.calDay ? `<div class="section"><h3 style="font-size:13px">${dateFmt(STATE.calDay)}</h3><div class="qgrid">${dayQs.map(q => qbox(q)).join("")}</div></div>` : ""}`;
+}
+function calShiftMonth(delta) { const [y, m] = CAL_MONTH.split("-").map(Number); CAL_MONTH = new Date(y, m - 1 + delta, 1).toISOString().slice(0, 7); STATE.calDay = null; render(); }
+function showCalDay(iso) { STATE.calDay = iso; render(); }
 
 // ============================================================
 // Investors
@@ -734,7 +898,7 @@ function investorsView() {
   if (!STATE.activeInvestor) {
     return layout("Investors", `${DB.investors.length} investor${DB.investors.length === 1 ? "" : "s"} in the capital pool`,
       `<div class="grid">${DB.investors.map(v => {
-        const ds = DB.deals.filter(d => d.investorId === v.id);
+        const ds = activeDeals().filter(d => d.investorId === v.id);
         const out = ds.reduce((s, d) => s + dealOutstanding(d.id), 0);
         const owed = investorOwed(v.id);
         return `<div class="card investor-card" onclick="selectInvestor('${v.id}')" style="cursor:pointer"><div class="row"><div><span class="color-dot" style="background:${v.fill}"></span> <b>${esc(v.name)}</b></div><div class="actions"><button class="btn small" onclick="event.stopPropagation();openInvestor('${v.id}')">Edit</button><button class="btn small danger" onclick="event.stopPropagation();deleteInvestor('${v.id}')">Delete</button></div></div>
@@ -742,31 +906,35 @@ function investorsView() {
         <div class="row" style="margin-top:12px"><span class="small muted">Deals funded</span><b>${ds.length}</b></div>
         <div class="row"><span class="small muted">Outstanding</span><b class="amber">${money(out)}</b></div>
         ${v.type !== "zero_benefit" ? `<div class="row" style="margin-top:6px;border-top:1px solid var(--line);padding-top:8px"><span class="small muted">Balance owed</span><b class="${owed >= 0 ? "green" : "red"}">${money(owed)}</b></div>` : ""}
+        ${v.type !== "zero_benefit" && owed >= PAYOUT_ALERT_THRESHOLD ? `<div class="small red" style="margin-top:6px;font-weight:800">⚠ Payout due (over ${money(PAYOUT_ALERT_THRESHOLD)})</div>` : ""}
         </div>`;
       }).join("") || '<div class="empty">No investors yet.</div>'}</div>`,
       `<button class="btn primary" onclick="openInvestor()">+ Add investor</button>`);
   }
 
   const v = investor(STATE.activeInvestor);
-  const ds = DB.deals.filter(d => d.investorId === v.id);
+  const ds = activeDeals().filter(d => d.investorId === v.id);
   const out = ds.reduce((s, d) => s + dealOutstanding(d.id), 0);
   const realized = investorRealizedProfit(v.id), withdrawn = investorWithdrawn(v.id), owed = realized - withdrawn;
   const payouts = investorPayouts(v.id);
 
   return layout("Investor settlement", "Profit accrued vs. already paid out",
-    `<div class="card header-card"><div class="row"><div><h2><span class="color-dot" style="background:${v.fill}"></span> ${esc(v.name)}</h2><div class="tags"><span class="tag" style="background:${v.bg};color:${v.textColor}">${v.type === "zero_benefit" ? "Zero-benefit" : "Profit-sharing"}</span></div></div><div class="actions"><button class="btn" onclick="openInvestor('${v.id}')">Edit investor</button>${v.type !== "zero_benefit" ? `<button class="btn primary" onclick="openPayout('${v.id}')">+ Record payout</button>` : ""}</div></div>
+    breadcrumb([{ label: "Investors", onclick: "setView('investors')" }, { label: v.name }]) +
+    `<div class="card header-card"><div class="row"><div><h2><span class="color-dot" style="background:${v.fill}"></span> ${esc(v.name)}</h2><div class="tags"><span class="tag" style="background:${v.bg};color:${v.textColor}">${v.type === "zero_benefit" ? "Zero-benefit" : "Profit-sharing"}</span></div></div><div class="actions"><button class="btn small" onclick="openShareLink('${v.id}')">🔗 ${v.share_token ? "Share link" : "Create share link"}</button><button class="btn" onclick="openInvestor('${v.id}')">Edit investor</button>${v.type !== "zero_benefit" ? `<button class="btn primary" onclick="openPayout('${v.id}')">+ Record payout</button>` : ""}</div></div>
     <div class="metrics">
       <div class="metric"><label>Deals funded</label><strong>${ds.length}</strong></div>
       <div class="metric"><label>Outstanding debt</label><strong class="amber">${money(out)}</strong></div>
       ${v.type !== "zero_benefit" ? `<div class="metric"><label>Realized profit</label><strong class="green">${money(realized)}</strong></div><div class="metric"><label>Already withdrawn</label><strong>${money(withdrawn)}</strong></div><div class="metric"><label>Balance owed</label><strong class="${owed >= 0 ? "green" : "red"}">${money(owed)}</strong></div>` : ""}
-    </div></div>
+    </div>
+    ${v.type !== "zero_benefit" && owed >= PAYOUT_ALERT_THRESHOLD ? `<div class="alert" style="margin-top:14px"><b>⚠ Payout due</b> — balance owed exceeds ${money(PAYOUT_ALERT_THRESHOLD)}.</div>` : ""}
+    </div>
     ${v.type === "zero_benefit" ? `<div class="empty">This investor is zero-benefit — no profit share or payouts apply, funds are tracked for the record only.</div>` : `
     <div class="section"><div class="section-head"><h3>Payout history</h3></div><div class="payment-list">${payouts.map(p => `<div class="payment row"><div><b class="red">− ${money(p.amount)}</b>${p.notes ? `<div class="small muted">${esc(p.notes)}</div>` : ""}</div><div class="row" style="gap:10px"><span class="small muted">${dateFmt(p.date)}</span><button class="btn small danger" onclick="deletePayout('${p.id}')">Delete</button></div></div>`).join("") || '<div class="empty">No payouts recorded yet.</div>'}</div></div>`}
     <div class="section"><div class="section-head"><h3>Deals funded</h3></div>${ds.map(d => {
       const c = client(d.clientId), received = dealReceived(d.id), pct = d.total ? Math.round(received / d.total * 100) : 0;
       return `<div class="card truck">
         <div class="truck-head">
-          <div><div class="truck-title">${esc(c?.name || "")} — ${esc(d.itemDetails || "Deal")}</div><div class="truck-sub">Purchased ${dateFmt(d.created)} · Kharid ${money(d.kharid)} + Munafa ${money(d.munafa)} = ${money(d.total)}</div></div>
+          <div><div class="truck-title">${esc(c?.name || "")} — ${esc(d.itemDetails || "Deal")}${dealIsAtRisk(d) ? ' <span class="tag" style="background:var(--red-bg);color:var(--red);font-weight:800">AT RISK</span>' : ''}</div><div class="truck-sub">Purchased ${dateFmt(d.created)} · Kharid ${money(d.kharid)} + Munafa ${money(d.munafa)} = ${money(d.total)}</div></div>
           <div class="actions"><button class="btn small" onclick="goToDealStatement('${c?.id}','${d.id}')">Statement</button><button class="btn small" onclick="openDeal('${c?.id}','${d.id}')">Edit</button></div>
         </div>
         <div class="row" style="margin-top:12px"><span class="small muted">${pct}% received · ${money(dealOutstanding(d.id))} outstanding</span><b class="green">${money(dealRealizedProfit(d))} profit realized</b></div>
@@ -774,6 +942,24 @@ function investorsView() {
       </div>`;
     }).join("") || '<div class="empty">No deals yet.</div>'}</div>`,
     `<button class="btn" onclick="setView('investors')">← Investors</button>`);
+}
+
+const PAYOUT_ALERT_THRESHOLD = 50000;
+
+async function openShareLink(investorId) {
+  const v = investor(investorId);
+  try {
+    const token = v.share_token || await dbGenerateShareToken(investorId);
+    const url = `${location.origin}${location.pathname}?share=${token}`;
+    openModal(`<h3>Investor share link</h3><p class="small muted">Read-only, no login required. Anyone with this link sees only ${esc(v.name)}'s own deals and profit.</p>
+    <div class="field full"><input id="shareUrl" value="${esc(url)}" readonly onclick="this.select()"></div>
+    <div class="modal-actions" style="justify-content:space-between"><button class="btn danger" onclick="revokeShareLink('${investorId}')">Revoke link</button><div style="display:flex;gap:8px"><button class="btn" onclick="closeModal()">Close</button><button class="btn primary" onclick="navigator.clipboard.writeText(document.getElementById('shareUrl').value);toast('Link copied')">Copy link</button></div></div>`);
+  } catch (err) { alert("Failed to create share link: " + err.message); }
+}
+async function revokeShareLink(investorId) {
+  if (!confirm("Revoke this share link? The old URL will stop working.")) return;
+  try { await dbRevokeShareToken(investorId); closeModal(); render(); toast("Share link revoked"); }
+  catch (err) { alert(err.message); }
 }
 
 function selectInvestor(id) { STATE.activeInvestor = id; STATE.view = "investors"; closeMobileNav(); render(); }
@@ -875,10 +1061,11 @@ function cashbookView() {
 function statementsView() {
   const clientId = STATE.stmtClient;
   const c = clientId ? client(clientId) : null;
-  const deals = c ? DB.deals.filter(d => d.clientId === c.id) : [];
+  const deals = c ? activeDeals().filter(d => d.clientId === c.id) : [];
   const dealSel = STATE.stmtDeal;
 
-  let body = `<div class="card header-card">
+  let body = breadcrumb(c ? [{ label: "Statements", onclick: "STATE.stmtClient='';STATE.stmtDeal='';render()" }, { label: c.name }] : [{ label: "Statements" }]);
+  body += `<div class="card header-card">
     <div class="field full" style="position:relative">
       <label>Client</label>
       <input id="stmtClientSearch" placeholder="Search client by name..." value="${c ? esc(c.name) : ""}" oninput="filterStatementClients(this.value)" onfocus="showStatementClientList()" autocomplete="off">
@@ -888,7 +1075,7 @@ function statementsView() {
       <option value="">Select a deal…</option>
       <option value="all" ${dealSel === "all" ? "selected" : ""}>All Deals (${deals.length})</option>
       ${deals.map(d => `<option value="${d.id}" ${dealSel === d.id ? "selected" : ""}>${esc(d.itemDetails || "Deal")} • ${dateFmt(d.created)} • ${dealOutstanding(d.id) > 0 ? "Active" : "Completed"}</option>`).join("")}
-    </select></div>` : '<p class="small muted" style="margin:10px 0 0">Search and pick a client above to see their deals — each deal keeps its own installments, dates, and profit, never combined.</p>'}
+    </select></div>` : `<p class="small muted" style="margin:10px 0 0">Search and pick a client above to see their deals — each deal keeps its own installments, dates, and profit, never combined.</p><button class="btn small" style="margin-top:10px" onclick="batchGenerateStatements()">⬇ Generate PDFs for all active clients</button>`}
   </div>`;
 
   if (c && dealSel === "all" && deals.length) {
@@ -905,13 +1092,15 @@ function filterStatementClients(q) {
   const list = document.getElementById("stmtClientList");
   if (!list) return;
   const query = (q || "").toLowerCase();
-  const matches = DB.clients.filter(cl => (cl.name || "").toLowerCase().includes(query)).slice(0, 8);
+  const matches = activeClients().filter(cl => (cl.name || "").toLowerCase().includes(query)).slice(0, 8);
   list.innerHTML = matches.map(cl => `<div class="ac-item" onmousedown="selectStatementClient('${cl.id}')">${esc(cl.name)}</div>`).join("") || `<div class="ac-item muted">No matching clients</div>`;
   list.style.display = "block";
 }
 function showStatementClientList() { filterStatementClients(document.getElementById("stmtClientSearch")?.value || ""); }
 function selectStatementClient(id) {
+  const prefs = getClientStmtPrefs(id);
   STATE.stmtClient = id; STATE.stmtDeal = ""; STATE.stmtRemarks = "";
+  STATE.stmtLang = prefs.lang || ""; STATE.stmtShowProfit = !!prefs.showProfit;
   render();
 }
 document.addEventListener("click", e => {
@@ -929,7 +1118,7 @@ function renderDealSummaryCard(d) {
   const nextDue = upcoming[0];
   const overdueCount = qs.filter(q => q.status !== "paid" && daysUntil(q.expectedDate) < 0).length;
   return `<div class="card header-card">
-    <div class="row"><div><h2 style="margin:0">${esc(c?.name || "")}</h2><div class="small muted">${esc(d.itemDetails || "Deal")} · Purchased ${dateFmt(d.created)}</div></div>${overdueCount ? `<span class="tag" style="background:var(--red-bg);color:var(--red);font-weight:800">${overdueCount} OVERDUE</span>` : ""}</div>
+    <div class="row"><div><h2 style="margin:0">${esc(c?.name || "")}</h2><div class="small muted">${esc(d.itemDetails || "Deal")} · Purchased ${dateFmt(d.created)}</div></div><div style="display:flex;gap:6px">${dealIsAtRisk(d) ? `<span class="tag" style="background:var(--red-bg);color:var(--red);font-weight:800">AT RISK</span>` : ""}${overdueCount ? `<span class="tag" style="background:var(--red-bg);color:var(--red);font-weight:800">${overdueCount} OVERDUE</span>` : ""}</div></div>
     <div class="metrics">
       <div class="metric"><label>Total Investment</label><strong style="font-size:22px">${money(d.total)}</strong></div>
       <div class="metric"><label>Paid</label><strong class="green" style="font-size:22px">${money(received)}</strong></div>
@@ -975,8 +1164,24 @@ function renderStatementComposer(dealIds, c) {
   </div>`;
 }
 
-function setStmtLang(lang) { STATE.stmtLang = lang; render(); }
-function setStmtProfit(show) { STATE.stmtShowProfit = show; render(); }
+function setStmtLang(lang) { STATE.stmtLang = lang; if (STATE.stmtClient) saveClientStmtPrefs(STATE.stmtClient, lang, STATE.stmtShowProfit); render(); }
+function setStmtProfit(show) { STATE.stmtShowProfit = show; if (STATE.stmtClient) saveClientStmtPrefs(STATE.stmtClient, STATE.stmtLang || LANG, show); render(); }
+
+function getClientStmtPrefs(clientId) { try { return JSON.parse(localStorage.getItem("maal_stmt_pref_" + clientId) || "{}"); } catch (e) { return {}; } }
+function saveClientStmtPrefs(clientId, lang, showProfit) { localStorage.setItem("maal_stmt_pref_" + clientId, JSON.stringify({ lang, showProfit })); }
+
+function batchGenerateStatements() {
+  const clients = activeClients().filter(c => activeDeals().some(d => d.clientId === c.id && dealOutstanding(d.id) > 0));
+  if (!clients.length) return alert("No active clients with outstanding balances.");
+  if (!confirm(`Generate ${clients.length} PDF statement(s), one per client? Your browser may ask to allow multiple downloads.`)) return;
+  clients.forEach((c, i) => {
+    setTimeout(() => {
+      const dealIds = activeDeals().filter(d => d.clientId === c.id).map(d => d.id);
+      const doc = buildStatementPDF(dealIds, false, "");
+      if (doc) doc.save(doc._filename);
+    }, i * 400);
+  });
+}
 
 // ============================================================
 // Settings — Account (change email), Security (change password),
@@ -985,6 +1190,7 @@ function setStmtProfit(show) { STATE.stmtShowProfit = show; render(); }
 function settingsView() {
   const email = CURRENT_SESSION?.user?.email || "";
   const themeIsDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const tc = trashedClients(), td = trashedDeals();
   return layout("Settings", "Account, security, and preferences", `
     <div class="card settings-card">
       <h3>Account</h3>
@@ -998,11 +1204,52 @@ function settingsView() {
       <h3>Preferences</h3>
       <div class="settings-row"><div><b>Language</b><div class="small muted">Interface labels only — your data stays as entered</div></div><button class="btn small" onclick="toggleLanguage()">${LANG === "en" ? "Switch to اردو" : "Switch to English"}</button></div>
       <div class="settings-row"><div><b>Theme</b><div class="small muted">Dark or light mode</div></div><button class="btn small" onclick="toggleTheme();render()">${themeIsDark ? "Switch to Light" : "Switch to Dark"}</button></div>
+      <div class="settings-row"><div><b>Company logo</b><div class="small muted">Shown on PDF statement headers</div></div><input type="file" accept="image/*" id="logoUpload" style="max-width:160px" onchange="saveCompanyLogo(this)"></div>
+      ${localStorage.getItem("maal_logo") ? `<div class="settings-row"><div class="small muted">Current logo</div><button class="btn small danger" onclick="localStorage.removeItem('maal_logo');render()">Remove logo</button></div>` : ""}
+    </div>
+    <div class="card settings-card">
+      <h3>Trash <span class="small muted">(${tc.length + td.length})</span></h3>
+      ${tc.map(c => `<div class="settings-row"><div><b>${esc(c.name)}</b><div class="small muted">Client</div></div><div style="display:flex;gap:6px"><button class="btn small" onclick="dbRestoreClient('${c.id}').then(render)">Restore</button><button class="btn small danger" onclick="permanentlyDeleteClient('${c.id}')">Delete forever</button></div></div>`).join("")}
+      ${td.map(d => `<div class="settings-row"><div><b>${esc(d.itemDetails || "Deal")}</b><div class="small muted">Deal · ${esc(client(d.clientId)?.name || "")}</div></div><div style="display:flex;gap:6px"><button class="btn small" onclick="dbRestoreDeal('${d.id}').then(render)">Restore</button><button class="btn small danger" onclick="permanentlyDeleteDeal('${d.id}')">Delete forever</button></div></div>`).join("")}
+      ${!tc.length && !td.length ? `<p class="small muted">Trash is empty.</p>` : ""}
+    </div>
+    <div class="card settings-card">
+      <h3>Audit Log</h3>
+      <div id="auditLogBox"><button class="btn small" onclick="loadAuditLogUI()">Load recent activity</button></div>
     </div>
     <div class="card settings-card">
       <h3>Session</h3>
       <div class="settings-row"><div><b>Signed in as ${esc(email)}</b></div><button class="btn small danger" onclick="doLogout()">Log out</button></div>
     </div>`, "");
+}
+
+function saveCompanyLogo(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => { localStorage.setItem("maal_logo", reader.result); toast("Logo saved"); render(); };
+  reader.readAsDataURL(file);
+}
+async function permanentlyDeleteClient(id) {
+  if (!confirm("Permanently delete this client? This cannot be undone.")) return;
+  try { await dbDeleteClient(id); render(); toast("Client permanently deleted"); } catch (e) { alert(e.message); }
+}
+async function permanentlyDeleteDeal(id) {
+  if (!confirm("Permanently delete this deal? This cannot be undone.")) return;
+  try { await dbDeleteDeal(id); render(); toast("Deal permanently deleted"); } catch (e) { alert(e.message); }
+}
+
+async function loadAuditLogUI() {
+  const box = document.getElementById("auditLogBox");
+  if (!box) return;
+  box.innerHTML = `<p class="small muted">Loading…</p>`;
+  try {
+    const rows = await dbFetchAuditLog(50);
+    box.innerHTML = `<button class="btn small" style="margin-bottom:10px" onclick="loadAuditLogUI()">↻ Refresh</button>
+      <div class="payment-list">${rows.map(r => `<div class="payment row"><div><b>${esc(r.action)}</b> · ${esc(r.entity)}${r.details ? ` — ${esc(r.details)}` : ""}<div class="small muted">${esc(r.actor_email || "unknown")}</div></div><div class="small muted">${new Date(r.at).toLocaleString("en-GB")}</div></div>`).join("") || '<div class="empty">No activity recorded yet.</div>'}</div>`;
+  } catch (err) {
+    box.innerHTML = `<p class="small" style="color:var(--red)">Failed to load: ${esc(err.message)}</p><button class="btn small" onclick="loadAuditLogUI()">Retry</button>`;
+  }
 }
 
 function openChangePassword() {
@@ -1091,8 +1338,8 @@ async function saveClient(id) {
 }
 
 async function deleteClient(id) {
-  if (!confirm("Delete this client and all their deals/qists permanently?")) return;
-  try { await dbDeleteClient(id); STATE.activeClient = null; render(); toast("Client deleted"); }
+  if (!confirm("Move this client to Trash? Their deals/qists are hidden but not lost — restore anytime from Settings.")) return;
+  try { await dbSoftDeleteClient(id); STATE.activeClient = null; render(); toast("Client moved to Trash"); }
   catch (err) { alert("Delete failed: " + err.message); }
 }
 
@@ -1157,8 +1404,8 @@ async function saveDeal(did) {
 }
 
 async function deleteDeal(id) {
-  if (!confirm("Delete this deal and all its qists/cashbook history permanently?")) return;
-  try { await dbDeleteDeal(id); render(); toast("Deal deleted"); }
+  if (!confirm("Move this deal to Trash? It's hidden but not lost — restore anytime from Settings.")) return;
+  try { await dbSoftDeleteDeal(id); render(); toast("Deal moved to Trash"); }
   catch (err) { alert("Delete failed: " + err.message); }
 }
 

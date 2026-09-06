@@ -169,3 +169,26 @@ html,body{max-width:100%;overflow-x:hidden}
 }
 @media(max-width:480px){.stats{grid-template-columns:1fr 1fr}.stat strong{font-size:17px}.actions .btn{padding:9px 10px}.qgrid{grid-template-columns:1fr 1fr}}
 @media(max-width:400px){.qgrid{grid-template-columns:1fr}.metrics{gap:16px}.owner-grid{grid-template-columns:1fr}}
+/* v4: breadcrumbs, headline stats w/ sparklines, bottom tabs, calendar */
+.breadcrumb{font-size:12px;color:var(--muted);margin-bottom:12px}
+.breadcrumb a{color:var(--teal);text-decoration:none;font-weight:700}
+.breadcrumb .sep{margin:0 6px}
+.headline-stats{grid-template-columns:repeat(3,1fr)}
+.headline-stats .stat strong{font-size:24px}
+.bottom-tabs{display:none}
+.cal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal-dow{text-align:center;font-size:10px;color:var(--muted);font-weight:800;padding:2px 0}
+.cal-cell{aspect-ratio:1;border:1px solid var(--line);border-radius:8px;padding:4px;font-size:11px}
+.cal-cell.empty{border:0}
+.cal-cell.has{background:var(--teal-bg);cursor:pointer}
+.cal-cell.overdue{background:var(--red-bg);border-color:#efb7b7;cursor:pointer}
+@media(max-width:800px){
+  .headline-stats{grid-template-columns:1fr}
+  .bottom-tabs{display:flex;position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--line);z-index:15;padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+  .bottom-tabs button{flex:1;background:none;border:0;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:9px;color:var(--muted);padding:6px 2px}
+  .bottom-tabs button span{font-size:9px}
+  .bottom-tabs button.active{color:var(--teal);font-weight:800}
+  .main{padding-bottom:74px}
+  .mobile-menu{display:none!important}
+}
