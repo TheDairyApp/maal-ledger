@@ -1438,7 +1438,16 @@ function openQist(id) {
   <div class="field"><label>Amount</label><input id="eqa" type="number" value="${q.amount}"></div>
   <div class="field"><label>Expected date</label><input id="eqd" type="date" value="${q.expectedDate || ""}"></div>
   </div><p class="small muted">Received amount: ${money(q.receivedAmount || 0)} · Status: ${qistStatusLabel(q)}</p>
-  <div class="modal-actions"><button class="btn danger" onclick="deleteQist('${id}')">Delete</button><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveQist('${id}')">Save</button></div>`);
+  <div class="modal-actions">${Number(q.receivedAmount || 0) > 0 ? `<button class="btn danger" onclick="undoLastPayment('${id}')">↩ Undo last payment</button>` : ""}<button class="btn danger" onclick="deleteQist('${id}')">Delete</button><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveQist('${id}')">Save</button></div>`);
+}
+
+async function undoLastPayment(id) {
+  if (!confirm("Undo the most recent payment on this installment? It will also be removed from the Cashbook.")) return;
+  try {
+    const reversed = await dbReversePayment(id);
+    closeModal(); render();
+    toast(`Undone: ${money(reversed.amount)} payment removed`);
+  } catch (err) { alert("Undo failed: " + err.message); }
 }
 
 async function saveQist(id) {

@@ -217,6 +217,36 @@ async function dbRecordQistPayment(qistId, amount, date, note, _fromQueue) {
   }
 }
 
+// Undoes the most recent payment recorded against a qist: finds its latest
+// cash_in cashbook entry, subtracts that amount back off receivedAmount,
+// recalculates status/receivedDate, and removes that cashbook entry.
+// Only reverses one payment at a time (the last one), not the whole history.
+async function dbReversePayment(qistId) {
+  const q = DB.qists.find(x => x.id === qistId);
+  if (!q) throw new Error("Installment not found.");
+
+  const entries = DB.cashbook.filter(e => e.type === "cash_in" && e.referenceId === qistId)
+    .sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.id || "").localeCompare(b.id || ""));
+  const last = entries[entries.length - 1];
+  if (!last) throw new Error("No payment found to undo for this installment.");
+
+  const newReceived = Math.max(0, Number(q.receivedAmount || 0) - Number(last.amount));
+  const remaining = entries.slice(0, -1);
+  const newDate = remaining.length ? remaining[remaining.length - 1].date : null;
+  const status = newReceived <= 0 ? "pending" : newReceived >= Number(q.amount) ? "paid" : "partial";
+
+  const { error: uErr } = await dbClient.from("qists").update({ received_amount: newReceived, received_date: newDate, status }).eq("id", qistId);
+  if (uErr) throw uErr;
+  const { error: dErr } = await dbClient.from("cashbook_entries").delete().eq("id", last.id);
+  if (dErr) throw dErr;
+
+  q.receivedAmount = newReceived; q.receivedDate = newDate; q.status = status;
+  DB.cashbook = DB.cashbook.filter(e => e.id !== last.id);
+  cacheDB();
+  dbLogAudit("qist", qistId, "undo_payment", `-${last.amount} (was recorded on ${last.date})`);
+  return last;
+}
+
 async function dbInsertPayout(po) {
   const { error } = await dbClient.from("investor_payouts").insert({ id: po.id, investor_id: po.investorId, amount: po.amount, date: po.date, notes: po.notes });
   if (error) throw error;

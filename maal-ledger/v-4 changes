@@ -40,3 +40,18 @@ Key changes: each installment gets its own two-line block with a blank line afte
 Formatting logic confirmed correct (the "Sept" vs "Sep" difference above is just a Node.js sandbox quirk, not a browser issue — real browsers render "Sep"). Final wiring check and delivery:
 
 Implemented as previewed. Both message types (buildDefaultWhatsAppMessage for single-qist reminders, buildStatementMessage for full deal statements) now produce properly spaced, line-broken text instead of one run-on line. Same patch/zip/files as before (still the full cumulative diff, DB unchanged this round).
+
+
+Maal Ledger — v4.0.2
+
+Added
+- Undo last payment: on any installment with a payment recorded, the
+  Edit modal now shows an "↩ Undo last payment" button. It reverses
+  the most recent payment only (not full history), recalculates the
+  installment's status (paid/partial/pending) and received amount,
+  removes the matching entry from the Cashbook, and logs the reversal
+  in the Audit Log.
+
+Files changed
+- js/db.js  — new dbReversePayment(qistId)
+- js/app.js — Undo button + handler in the qist edit modal
