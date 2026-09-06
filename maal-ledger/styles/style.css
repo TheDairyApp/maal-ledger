@@ -150,6 +150,9 @@ html,body{max-width:100%;overflow-x:hidden}
   .modal{padding:16px;border-radius:12px;max-height:94vh}
   .modal-actions{flex-wrap:wrap}
   .modal-actions button{flex:1;min-width:120px}
+  .truck-head{flex-direction:column;align-items:stretch}
+  .truck-head .actions{width:100%}
+  .truck-head .actions .btn{flex:1;white-space:nowrap}
   .filter-bar{flex-direction:column;align-items:stretch}
   .filter-bar .field{min-width:0}
   .brand{padding-bottom:10px}

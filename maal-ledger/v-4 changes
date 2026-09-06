@@ -1,47 +1,3 @@
--- Safe, additive only. Run once in Supabase SQL Editor.
-alter table clients add column if not exists deleted_at timestamptz;
-alter table deals add column if not exists deleted_at timestamptz;
-alter table investors add column if not exists share_token text unique;
-
-create table if not exists audit_log (
-  id text primary key,
-  entity text not null,
-  entity_id text not null,
-  action text not null,
-  details text,
-  actor_email text,
-  at timestamptz not null default now()
-);
-alter table audit_log enable row level security;
-drop policy if exists "Authenticated full access" on audit_log;
-create policy "Authenticated full access" on audit_log for all to authenticated using (true) with check (true);
-
--- Public, read-only access for investor share links (no login).
--- Only rows matching a valid share_token are exposed — not a blanket anon policy.
-drop policy if exists "Public read via share token" on investors;
-create policy "Public read via share token" on investors for select to anon using (share_token is not null);
-drop policy if exists "Public read deals for shared investor" on deals;
-create policy "Public read deals for shared investor" on deals for select to anon using (
-  investor_id in (select id from investors where share_token is not null)
-);
-drop policy if exists "Public read qists for shared investor deals" on qists;
-create policy "Public read qists for shared investor deals" on qists for select to anon using (
-  deal_id in (select id from deals where investor_id in (select id from investors where share_token is not null))
-);
-drop policy if exists "Public read clients for shared investor deals" on clients;
-create policy "Public read clients for shared investor deals" on clients for select to anon using (
-  id in (select client_id from deals where investor_id in (select id from investors where share_token is not null))
-);
-
-
-
-Key changes: each installment gets its own two-line block with a blank line after it, a divider before totals, ✅/⏳/🔴 for instant scanning, bold deal headers (*text* renders bold in WhatsApp), and Urdu now uses Urdu month names instead of mixing in English ones. Implementing now.
-
-Formatting logic confirmed correct (the "Sept" vs "Sep" difference above is just a Node.js sandbox quirk, not a browser issue — real browsers render "Sep"). Final wiring check and delivery:
-
-Implemented as previewed. Both message types (buildDefaultWhatsAppMessage for single-qist reminders, buildStatementMessage for full deal statements) now produce properly spaced, line-broken text instead of one run-on line. Same patch/zip/files as before (still the full cumulative diff, DB unchanged this round).
-
-
 Maal Ledger — v4.0.2
 
 Added
@@ -55,3 +11,15 @@ Added
 Files changed
 - js/db.js  — new dbReversePayment(qistId)
 - js/app.js — Undo button + handler in the qist edit modal
+
+Maal Ledger — v4.0.3
+
+Fixed
+- Deal card action buttons (Statement / Edit deal / Delete) were
+  squeezed into a narrow vertical column next to the deal title on
+  mobile, instead of forming their own row. .truck-head now stacks
+  vertically on mobile (title full-width on top, then the 3 buttons
+  as an even full-width row below).
+
+Files changed
+- styles/style.css only
