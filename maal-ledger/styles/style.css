@@ -127,12 +127,6 @@ html,body{max-width:100%;overflow-x:hidden}
 .settings-row:last-child{border-bottom:0}
 .filter-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:16px;padding:14px;background:var(--card);border:1px solid var(--line);border-radius:12px}
 .filter-bar .field{min-width:150px}
-.nc-wrap{margin:4px 0 10px;padding-top:8px;border-top:1px solid #ffffff1c}
-.nc-label{font-size:10.5px;color:#a5afc1;padding:0 10px;margin-bottom:6px;font-weight:800;text-transform:uppercase;letter-spacing:.03em}
-.nc-item{padding:6px 10px;cursor:pointer;border-radius:8px}
-.nc-item:hover{background:#ffffff12}
-.nc-item .row{color:#fff;font-size:11px}
-.nc-empty{font-size:11px;color:#7c8aa3;padding:0 10px}
 .autocomplete-list{display:none;position:absolute;left:0;right:0;top:100%;background:var(--card);border:1px solid var(--line);border-radius:8px;margin-top:4px;max-height:220px;overflow:auto;z-index:30;box-shadow:var(--shadow)}
 .ac-item{padding:9px 12px;cursor:pointer;font-size:13px}
 .ac-item:hover{background:var(--page)}

@@ -718,26 +718,10 @@ async function startApp() {
 // ============================================================
 // Shell / navigation
 // ============================================================
-function nearlyCompleteDeals(limit = 3) {
-  return DB.deals
-    .map(d => ({ d, pct: d.total ? Math.round((dealReceived(d.id) / d.total) * 100) : 0 }))
-    .filter(x => x.pct > 0 && x.pct < 100)
-    .sort((a, b) => b.pct - a.pct)
-    .slice(0, limit);
-}
-
 function renderSidebar() {
   const q = STATE.search.toLowerCase();
   const cs = activeClients().filter(c => (c.name || "").toLowerCase().includes(q));
   const list = document.getElementById("custList");
-  const nc = document.getElementById("nearlyComplete");
-  if (nc) {
-    const top = nearlyCompleteDeals();
-    nc.innerHTML = `<div class="nc-wrap"><div class="nc-label">Nearly complete</div>${top.map(x => {
-      const c = client(x.d.clientId);
-      return `<div class="nc-item" onclick="selectClient('${x.d.clientId}')"><div class="row"><span>${esc(c?.name || "")}</span><span style="font-weight:800">${x.pct}%</span></div><div class="mini"><i style="width:${x.pct}%"></i></div></div>`;
-    }).join("") || '<div class="nc-empty">No active deals yet.</div>'}</div>`;
-  }
   if (!list) return;
   list.innerHTML = cs.map(c => {
     const ds = activeDeals().filter(d => d.clientId === c.id);
@@ -824,7 +808,7 @@ function qbox(q, showCheckbox) {
   const remaining = Number(q.amount) - Number(q.receivedAmount || 0);
   const cls = q.status === "paid" ? "paid" : daysUntil(q.expectedDate) < 0 ? "overdue" : daysUntil(q.expectedDate) <= 7 ? "soon" : "";
   const idx = d ? dealQists(d.id).findIndex(x => x.id === q.id) + 1 : 0;
-  const checkbox = showCheckbox && q.status !== "paid" ? `<input type="checkbox" onclick="event.stopPropagation();toggleBulkSelect('${q.id}',this.checked)" style="position:absolute;top:8px;left:8px;width:18px;height:18px;z-index:2">` : "";
+  const checkbox = showCheckbox && q.status !== "paid" ? `<input type="checkbox" onclick="event.stopPropagation();toggleBulkSelect('${q.id}',this.checked)" style="position:absolute;top:8px;right:8px;width:18px;height:18px;z-index:2">` : "";
   return `<div class="qbox ${cls}" style="position:relative">
     ${checkbox}
     ${q.status === "paid" ? '<div class="stamp">PAID</div>' : ''}
@@ -858,7 +842,7 @@ function clientsView() {
   return layout("Client", "All deals and qists for this client",
     breadcrumb([{ label: "Clients", onclick: "setView('clients')" }, { label: c.name }]) +
     `<div class="card header-card"><div class="row"><div><h2>${esc(c.name)}</h2><div class="small muted">${c.phone || "No phone"}</div></div><div class="actions"><button class="btn" onclick="openClient('${c.id}')">Edit client</button><button class="btn primary" onclick="openDeal('${c.id}')">+ Add deal</button></div></div><div class="metrics"><div class="metric"><label>Total tracked</label><strong>${money(total)}</strong></div><div class="metric"><label>Received</label><strong class="green">${money(got)}</strong></div><div class="metric"><label>Outstanding</label><strong class="amber">${money(out)}</strong></div></div><div class="progress"><i style="width:${total ? Math.round(got / total * 100) : 0}%"></i></div></div>
-    ${ds.map(d => { const v = investor(d.investorId); return `<div class="card truck"><div class="truck-head"><div><div class="truck-title">${esc(d.itemDetails || "Deal")}${dealIsAtRisk(d) ? ' <span class="tag" style="background:var(--red-bg);color:var(--red);font-weight:800">AT RISK</span>' : ''}</div><div class="truck-sub">Investor: ${v ? esc(v.name) : "—"} · Kharid ${money(d.kharid)} + Munafa ${money(d.munafa)} = ${money(d.total)}</div></div><div class="actions"><button class="btn small" onclick="goToDealStatement('${c.id}','${d.id}')">Statement</button><button class="btn small" onclick="openDeal('${c.id}','${d.id}')">Edit deal</button><button class="btn small danger" onclick="deleteDeal('${d.id}')">Delete</button></div></div><div class="route">${dealQists(d.id).map(qbox).join("")}</div></div>`; }).join("") || '<div class="empty">No deals for this client.</div>'}`,
+    ${ds.map(d => { const v = investor(d.investorId); return `<div class="card truck"><div class="truck-head"><div><div class="truck-title">${esc(d.itemDetails || "Deal")}${dealIsAtRisk(d) ? ' <span class="tag" style="background:var(--red-bg);color:var(--red);font-weight:800">AT RISK</span>' : ''}</div><div class="truck-sub">Investor: ${v ? esc(v.name) : "—"} · Kharid ${money(d.kharid)} + Munafa ${money(d.munafa)} = ${money(d.total)}</div></div><div class="actions"><button class="btn small" onclick="goToDealStatement('${c.id}','${d.id}')">Statement</button><button class="btn small" onclick="openDeal('${c.id}','${d.id}')">Edit deal</button><button class="btn small danger" onclick="deleteDeal('${d.id}')">Delete</button></div></div><div class="route">${dealQists(d.id).map(q => qbox(q)).join("")}</div></div>`; }).join("") || '<div class="empty">No deals for this client.</div>'}`,
     `<button class="btn" onclick="setView('clients')">← Clients</button>`);
 }
 
@@ -1091,7 +1075,10 @@ function statementsView() {
   body += `<div class="card header-card">
     <div class="field full" style="position:relative">
       <label>Client</label>
-      <input id="stmtClientSearch" placeholder="Search client by name..." value="${c ? esc(c.name) : ""}" oninput="filterStatementClients(this.value)" onfocus="showStatementClientList()" autocomplete="off">
+      <div style="display:flex;gap:8px">
+        <input id="stmtClientSearch" placeholder="Search or tap to select a client..." value="${c ? esc(c.name) : ""}" oninput="filterStatementClients(this.value)" onfocus="filterStatementClients('')" autocomplete="off" style="flex:1">
+        ${c ? `<button class="btn small" onclick="clearStatementClient()">✕ Clear</button>` : ""}
+      </div>
       <div id="stmtClientList" class="autocomplete-list"></div>
     </div>
     ${c ? `<div class="field full" style="margin-top:12px"><label>Deal</label><select onchange="STATE.stmtDeal=this.value;STATE.stmtRemarks=(this.value&&this.value!=='all')?(deal(this.value)?.remarks||''):'';render()">
@@ -1115,15 +1102,18 @@ function filterStatementClients(q) {
   const list = document.getElementById("stmtClientList");
   if (!list) return;
   const query = (q || "").toLowerCase();
-  const matches = activeClients().filter(cl => (cl.name || "").toLowerCase().includes(query)).slice(0, 8);
+  const matches = activeClients().filter(cl => (cl.name || "").toLowerCase().includes(query)).slice(0, 50);
   list.innerHTML = matches.map(cl => `<div class="ac-item" onmousedown="selectStatementClient('${cl.id}')">${esc(cl.name)}</div>`).join("") || `<div class="ac-item muted">No matching clients</div>`;
   list.style.display = "block";
 }
-function showStatementClientList() { filterStatementClients(document.getElementById("stmtClientSearch")?.value || ""); }
 function selectStatementClient(id) {
   const prefs = getClientStmtPrefs(id);
   STATE.stmtClient = id; STATE.stmtDeal = ""; STATE.stmtRemarks = "";
   STATE.stmtLang = prefs.lang || ""; STATE.stmtShowProfit = !!prefs.showProfit;
+  render();
+}
+function clearStatementClient() {
+  STATE.stmtClient = ""; STATE.stmtDeal = ""; STATE.stmtRemarks = "";
   render();
 }
 document.addEventListener("click", e => {
